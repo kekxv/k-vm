@@ -1,0 +1,6 @@
+load("//build:defs.bzl", "vm_library")
+
+package(default_visibility = ["//visibility:public"])
+
+# Used by the upstream Emscripten frontend, not the native OpenSSL backend.
+vm_library(name = "crypto", srcs = ["aes.c", "sha256.c"])

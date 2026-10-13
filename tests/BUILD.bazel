@@ -1,0 +1,199 @@
+sh_test(
+    name = "smoke_test",
+    size = "small",
+    srcs = ["run_smoke.sh"],
+    data = [
+        "smoke_test.py",
+        "//:k-vm",
+    ],
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+)
+
+cc_test(
+    name = "network_test",
+    size = "small",
+    srcs = ["network_test.c"],
+    deps = ["//src/net:network"],
+)
+
+cc_test(
+    name = "confined_fs_test",
+    size = "small",
+    srcs = ["confined_fs_test.c"],
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    deps = ["//src/storage:confined"],
+)
+
+cc_test(
+    name = "block_file_test",
+    size = "small",
+    srcs = ["block_file_test.c"],
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    deps = ["//src/storage:block_file"],
+)
+
+sh_test(
+    name = "sandbox_test",
+    size = "small",
+    srcs = ["run_sandbox.sh"],
+    data = [
+        "sandbox_test.py",
+        "//:k-vm",
+    ],
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+)
+
+sh_test(
+    name = "prepare_image_test",
+    size = "small",
+    srcs = ["run_prepare_image.sh"],
+    data = [
+        "prepare_image_test.py",
+        "//tools:prepare_linux_image",
+    ],
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+)
+
+cc_test(
+    name = "workspace_test",
+    size = "small",
+    srcs = ["workspace_test.c"],
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    deps = ["//src/sandbox:workspace"],
+)
+
+cc_test(
+    name = "image_update_test",
+    size = "small",
+    srcs = ["image_update_test.c"],
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    deps = ["//src/storage:image_update"],
+)
+
+sh_test(
+    name = "prepare_agent_test",
+    size = "small",
+    srcs = ["run_agent_prepare.sh"],
+    data = [
+        "//tools:agent_prepare_tests",
+        "//tools:prepare_agent_image",
+    ],
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+)
+
+# Exercise the macOS-compatible host IO implementation on Linux as well.
+cc_test(
+    name = "portable_confined_fs_test",
+    size = "small",
+    srcs = ["confined_fs_test.c"],
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    deps = ["//src/storage:confined_portable"],
+)
+
+cc_test(
+    name = "portable_workspace_test",
+    size = "small",
+    srcs = ["workspace_test.c"],
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    deps = ["//src/sandbox:workspace_portable"],
+)
+
+cc_test(
+    name = "portable_image_update_test",
+    size = "small",
+    srcs = ["image_update_test.c"],
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    deps = ["//src/storage:image_update_portable"],
+)
+
+sh_test(
+    name = "wsl_launcher_test",
+    size = "small",
+    srcs = ["run_wsl_launcher.sh"],
+    data = [
+        "wsl_launcher_test.py",
+        "//tools:wsl_launcher",
+    ],
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+)
+
+cc_test(
+    name = "win32_disk_test",
+    size = "small",
+    srcs = ["win32_disk_test.c"],
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        "//src/storage:block_file",
+        "//src/storage:image_update",
+    ],
+)
+
+cc_test(
+    name = "win32_filesystem_test",
+    size = "small",
+    srcs = ["win32_filesystem_test.c"],
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        "//src/storage:confined",
+        "//src/storage:win32_files",
+    ],
+)
+
+cc_test(
+    name = "win32_workspace_test",
+    size = "small",
+    srcs = ["win32_workspace_test.c"],
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        "//src/sandbox:workspace",
+        "//src/storage:win32_files",
+    ],
+)
+
+cc_test(
+    name = "win32_console_test",
+    size = "small",
+    srcs = ["win32_console_test.c"],
+    linkopts = ["-lws2_32"],
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        "//src/frontend:console_test_source",
+        "//src/include:headers",
+    ],
+)

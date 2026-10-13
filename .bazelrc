@@ -1,0 +1,35 @@
+build --compilation_mode=opt
+build --copt=-std=gnu11
+build --copt=-Wall
+# TinyEMU requires assertions even in optimized builds.
+build --copt=-UNDEBUG
+build --copt=-fno-strict-aliasing
+build:sdl --define=sdl=true
+test --test_output=errors
+
+# Optional native MSYS2 MinGW-w64 toolchain (run Bazel from Windows).
+build:win32 --compiler=mingw-gcc
+build:win32 --cpu=x64_windows
+build:win32 --platforms=//build:win32
+build:win32 --incompatible_enable_cc_toolchain_resolution=false
+
+# Portable terminal releases: local images/exports, guest SLIRP still enabled.
+build:portable --define=local_only=true
+build:portable --incompatible_enable_cc_toolchain_resolution=true
+build:linux-amd64-glibc --config=portable
+build:linux-amd64-glibc --platforms=@zig_sdk//platform:linux_amd64
+build:linux-amd64-glibc --extra_toolchains=@zig_sdk//toolchain:linux_amd64_gnu.2.28
+build:linux-arm64-glibc --config=portable
+build:linux-arm64-glibc --platforms=@zig_sdk//platform:linux_arm64
+build:linux-arm64-glibc --extra_toolchains=@zig_sdk//toolchain:linux_arm64_gnu.2.28
+build:linux-amd64-musl --config=portable
+build:linux-amd64-musl --platforms=@zig_sdk//platform:linux_amd64
+build:linux-amd64-musl --extra_toolchains=@zig_sdk//toolchain:linux_amd64_musl
+build:linux-amd64-musl --linkopt=-static
+build:linux-arm64-musl --config=portable
+build:linux-arm64-musl --platforms=@zig_sdk//platform:linux_arm64
+build:linux-arm64-musl --extra_toolchains=@zig_sdk//toolchain:linux_arm64_musl
+build:linux-arm64-musl --linkopt=-static
+build:portable --dynamic_mode=off
+# This project is C-only; do not build/link Zig's C++ runtime for cc_test.
+build:portable --linkopt=-nostdlib++

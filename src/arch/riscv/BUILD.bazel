@@ -1,0 +1,27 @@
+load("//build:defs.bzl", "vm_library")
+
+package(default_visibility = ["//visibility:public"])
+
+vm_library(
+    name = "softfp",
+    srcs = ["softfp.c"],
+    hdrs = ["softfp_template.h", "softfp_template_icvt.h"],
+)
+
+# The same interpreter is compiled three times with distinct private MAX_XLEN.
+[
+    vm_library(
+        name = "cpu" + str(xlen),
+        srcs = ["riscv_cpu.c"],
+        hdrs = ["riscv_cpu_priv.h", "riscv_cpu_template.h", "riscv_cpu_fp_template.h"],
+        local_defines = ["MAX_XLEN=" + str(xlen)],
+        deps = [":softfp", "//src/core:utils"] + ([":cpu32", ":cpu64"] if xlen == 128 else []),
+    )
+    for xlen in [32, 64, 128]
+]
+
+vm_library(
+    name = "riscv",
+    srcs = ["riscv_machine.c"],
+    deps = [":cpu128", "//src/devices:devices"],
+)

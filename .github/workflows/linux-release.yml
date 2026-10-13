@@ -1,0 +1,85 @@
+name: Linux builds and releases
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  build:
+    name: ${{ matrix.arch }} / ${{ matrix.libc }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {arch: amd64, libc: glibc, runner: ubuntu-24.04}
+          - {arch: amd64, libc: musl, runner: ubuntu-24.04}
+          - {arch: arm64, libc: glibc, runner: ubuntu-24.04-arm}
+          - {arch: arm64, libc: musl, runner: ubuntu-24.04-arm}
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: bazel-contrib/setup-bazel@0.14.0
+        with:
+          bazelisk-cache: true
+          disk-cache: ${{ github.workflow }}-${{ matrix.arch }}-${{ matrix.libc }}
+          repository-cache: true
+      - name: Install guest fixture tools
+        run: sudo apt-get update && sudo apt-get install -y e2fsprogs binutils
+      - name: Build and test portable runtime
+        run: |
+          bazel test --config=linux-${{ matrix.arch }}-${{ matrix.libc }} \
+            //:k-vm //tests:network_test //tests:confined_fs_test \
+            //tests:block_file_test //tests:image_update_test //tests:workspace_test \
+            //tests:portable_confined_fs_test //tests:portable_image_update_test \
+            //tests:portable_workspace_test //tests:sandbox_test
+      - name: Validate ELF ABI and package
+        run: python3 tools/package_linux.py --arch '${{ matrix.arch }}' --libc '${{ matrix.libc }}' --glibc 2.28
+      - name: Prepare reference guest
+        run: python3 tools/prepare_linux_image.py --output images/ci-riscv64
+      - name: Guest mappings, networking, command interruption and updates
+        run: |
+          python3 tests/agent_workspace_check.py --image images/ci-riscv64
+          python3 tests/linux_sandbox_check.py --image images/ci-riscv64
+          python3 tests/pi_update_check.py --image images/ci-riscv64
+          python3 tests/agent_dispatch_check.py --image images/ci-riscv64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: k-vm-linux-${{ matrix.arch }}-${{ matrix.libc }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: k-vm-linux-*
+          merge-multiple: true
+          path: dist
+      - name: Verify checksums
+        working-directory: dist
+        run: sha256sum --check *.sha256
+      - name: Publish tagged release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" --verify-tag --generate-notes --title "k-vm $RELEASE_TAG"
+          fi
+          gh release upload "$RELEASE_TAG" dist/* --clobber

@@ -1,0 +1,2 @@
+exports_files(["k-vm-init.sh"])
+filegroup(name = "bootstrap", srcs = ["k-vm-init.sh"], visibility = ["//visibility:public"])

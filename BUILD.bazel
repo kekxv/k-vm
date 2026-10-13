@@ -1,0 +1,5 @@
+cc_binary(
+    name = "k-vm",
+    deps = ["//src/frontend:frontend"],
+    visibility = ["//visibility:public"],
+)

@@ -1,0 +1,56 @@
+load("//build:defs.bzl", "vm_library")
+
+package(default_visibility = ["//visibility:public"])
+
+vm_library(
+    name = "frontend",
+    srcs = ["main.c"] + select({
+        "@platforms//os:windows": [
+            "console_win32.c",
+            "win32_entry.c",
+        ],
+        "//conditions:default": [],
+    }) + select({
+        "//build:sdl_enabled": ["sdl.c"],
+        "//conditions:default": [],
+    }),
+    hdrs = ["console_win32.h"],
+    copts = select({"@platforms//os:windows": ["-mno-ms-bitfields"], "//conditions:default": []}),
+    linkopts = select({
+        "@platforms//os:windows": [
+            "-static",
+            "-lws2_32",
+            "-liphlpapi",
+            "-lshell32",
+            "-lbcrypt",
+            "-ladvapi32",
+        ],
+        "@platforms//os:macos": [],
+        "//conditions:default": ["-lrt"],
+    }) + select({
+        "//build:sdl_enabled": ["-lSDL"],
+        "//conditions:default": [],
+    }),
+    deps = [
+        "//src/core:machine",
+        "//src/net:network",
+        "//src/sandbox:launch",
+        "//src/sandbox:update",
+        "//src/storage:confined",
+    ] + select({
+        "@platforms//os:windows": ["//src/storage:win32_files"],
+        "//conditions:default": [],
+    }),
+)
+
+cc_library(
+    name = "console_test_source",
+    testonly = True,
+    hdrs = ["console_win32.h"],
+    target_compatible_with = ["@platforms//os:windows"],
+    textual_hdrs = ["console_win32.c"],
+    deps = [
+        "//src/include:headers",
+        "//src/storage:image_update",
+    ],
+)

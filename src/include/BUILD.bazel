@@ -1,0 +1,9 @@
+package(default_visibility = ["//visibility:public"])
+
+# Shared interfaces; implementation and template headers stay local.
+cc_library(
+    name = "headers",
+    hdrs = glob(["*.h"]),
+    includes = ["."],
+    deps = ["//build:config"],
+)

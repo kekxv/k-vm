@@ -1,0 +1,48 @@
+package(default_visibility = ["//visibility:public"])
+
+config_setting(
+    name = "local_only",
+    define_values = {"local_only": "true"},
+)
+
+config_setting(
+    name = "sdl_enabled",
+    define_values = {"sdl": "true"},
+)
+
+# Macros affect shared headers and must agree in every translation unit.
+cc_library(
+    name = "config",
+    defines = [
+        "_GNU_SOURCE",
+        "_FILE_OFFSET_BITS=64",
+        "_LARGEFILE_SOURCE",
+        r'CONFIG_VERSION=\"0.1.0\"',
+        "CONFIG_SLIRP",
+        "CONFIG_RISCV_MAX_XLEN=128",
+    ] + select({
+        "@platforms//os:windows": [
+            "_WIN32_WINNT=0x0602",
+            "WIN32_LEAN_AND_MEAN",
+            "NOMINMAX",
+        ],
+        "//conditions:default": [],
+    }) + select({
+        ":local_only": [],
+        "@platforms//os:windows": [],
+        "//conditions:default": ["CONFIG_FS_NET"],
+    }) + select({
+        ":sdl_enabled": ["CONFIG_SDL"],
+        "//conditions:default": [],
+    }),
+)
+
+exports_files(["defs.bzl"])
+
+platform(
+    name = "win32",
+    constraint_values = [
+        "@platforms//os:windows",
+        "@platforms//cpu:x86_64",
+    ],
+)

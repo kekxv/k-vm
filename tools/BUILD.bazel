@@ -1,0 +1,58 @@
+package(default_visibility = ["//visibility:public"])
+
+cc_binary(
+    name = "build_filelist",
+    srcs = ["build_filelist.c"],
+    linkopts = ["-lm"],
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    deps = ["//src/storage:utils"],
+)
+
+cc_binary(
+    name = "splitimg",
+    srcs = ["splitimg.c"],
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    deps = ["//build:config"],
+)
+
+sh_binary(
+    name = "prepare_linux_image",
+    srcs = ["prepare_linux_image.py"],
+    data = [
+        "install_guest_bootstrap.py",
+        "//guest:bootstrap",
+    ],
+)
+
+sh_binary(
+    name = "prepare_agent_image",
+    srcs = ["prepare_agent_image.py"],
+    data = [
+        "agent_image/Dockerfile",
+        "//guest:bootstrap",
+    ],
+)
+
+filegroup(
+    name = "agent_prepare_tests",
+    srcs = ["agent_image/test_prepare.py"],
+)
+
+filegroup(
+    name = "wsl_launcher",
+    srcs = [
+        "k-vm.cmd",
+        "k_vm_wsl.py",
+    ],
+)
+
+exports_files([
+    "build_win32.py",
+    "k-vm.cmd",
+])

@@ -1,0 +1,72 @@
+load("//build:defs.bzl", "vm_library")
+
+package(default_visibility = ["//visibility:public"])
+
+vm_library(
+    name = "launch",
+    srcs = ["launch.c"],
+    hdrs = ["launch.h"],
+    includes = ["."],
+    deps = [
+        ":workspace",
+        "//src/core:machine",
+        "//src/storage:block_file",
+    ] + select({
+        "@platforms//os:windows": ["//src/storage:win32_files"],
+        "//conditions:default": [],
+    }),
+)
+
+vm_library(
+    name = "workspace",
+    srcs = ["workspace.c"] + select({
+        "@platforms//os:windows": ["workspace_host_win32.c"],
+        "//conditions:default": ["workspace_host_posix.c"],
+    }),
+    hdrs = [
+        "workspace.h",
+        "workspace_host.h",
+    ],
+    includes = ["."],
+    linkopts = select({
+        "@platforms//os:windows": ["-ladvapi32"],
+        "//conditions:default": [],
+    }),
+    deps = select({
+        "@platforms//os:windows": ["//src/storage:win32_files"],
+        "//conditions:default": ["//src/storage:host_io"],
+    }),
+)
+
+vm_library(
+    name = "update",
+    srcs = select({
+        "@platforms//os:windows": ["update_win32.c"],
+        "//conditions:default": ["update.c"],
+    }),
+    hdrs = ["update.h"],
+    includes = ["."],
+    deps = [
+        ":workspace",
+        "//src/storage:image_update",
+    ],
+)
+
+vm_library(
+    name = "workspace_portable",
+    testonly = True,
+    srcs = [
+        "workspace.c",
+        "workspace_host_posix.c",
+    ],
+    hdrs = [
+        "workspace.h",
+        "workspace_host.h",
+    ],
+    includes = ["."],
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    deps = ["//src/storage:host_io_portable"],
+)

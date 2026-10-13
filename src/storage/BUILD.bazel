@@ -1,0 +1,150 @@
+load("//build:defs.bzl", "vm_library")
+
+package(default_visibility = ["//visibility:public"])
+
+vm_library(
+    name = "block_file",
+    srcs = select({
+        "@platforms//os:windows": ["block_file_win32.c"],
+        "//conditions:default": ["block_file.c"],
+    }),
+    hdrs = ["block_file.h"],
+    includes = ["."],
+    deps = select({
+        "@platforms//os:windows": [":win32_files"],
+        "//conditions:default": [],
+    }),
+)
+
+vm_library(
+    name = "filesystem",
+    srcs = ["fs.c"],
+    deps = ["//src/core:utils"],
+)
+
+vm_library(
+    name = "host_io",
+    srcs = select({
+        "@platforms//os:macos": ["host_io_posix.c"],
+        "//conditions:default": ["host_io_linux.c"],
+    }),
+    hdrs = ["host_io.h"],
+    includes = ["."],
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+)
+
+vm_library(
+    name = "confined",
+    srcs = select({
+        "@platforms//os:windows": ["fs_confined_win32.c"],
+        "//conditions:default": ["fs_confined.c"],
+    }),
+    deps = [":filesystem"] + select({
+        "@platforms//os:windows": [":win32_files"],
+        "//conditions:default": [":host_io"],
+    }),
+)
+
+vm_library(
+    name = "host_io_portable",
+    testonly = True,
+    srcs = ["host_io_posix.c"],
+    hdrs = ["host_io.h"],
+    includes = ["."],
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+)
+
+vm_library(
+    name = "confined_portable",
+    testonly = True,
+    srcs = ["fs_confined.c"],
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    deps = [
+        ":filesystem",
+        ":host_io_portable",
+    ],
+)
+
+vm_library(
+    name = "utils",
+    srcs = ["fs_utils.c"],
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    deps = ["//src/core:utils"],
+)
+
+vm_library(
+    name = "storage",
+    srcs = select({
+        "@platforms//os:windows": [],
+        "//build:local_only": ["fs_disk.c"],
+        "//conditions:default": [
+            "block_net.c",
+            "fs_disk.c",
+            "fs_net.c",
+            "fs_wget.c",
+        ],
+    }),
+    linkopts = select({
+        "@platforms//os:windows": [],
+        "//build:local_only": [],
+        "//conditions:default": [
+            "-lcurl",
+            "-lcrypto",
+        ],
+    }),
+    deps = [
+        ":filesystem",
+        "//src/core:utils",
+    ] + select({
+        "@platforms//os:windows": [],
+        "//build:local_only": [":utils"],
+        "//conditions:default": [":utils"],
+    }),
+)
+
+vm_library(
+    name = "image_update",
+    srcs = select({
+        "@platforms//os:windows": ["image_update_win32.c"],
+        "//conditions:default": ["image_update.c"],
+    }),
+    hdrs = ["image_update.h"],
+    includes = ["."],
+    deps = select({
+        "@platforms//os:windows": [":win32_files"],
+        "//conditions:default": [],
+    }),
+)
+
+vm_library(
+    name = "image_update_portable",
+    testonly = True,
+    srcs = ["image_update.c"],
+    hdrs = ["image_update.h"],
+    copts = ["-DK_VM_PORTABLE_CLONE"],
+    includes = ["."],
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+)
+
+vm_library(
+    name = "win32_files",
+    srcs = ["win32_files.c"],
+    hdrs = ["win32_files.h"],
+    includes = ["."],
+    target_compatible_with = ["@platforms//os:windows"],
+)

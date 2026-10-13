@@ -1,0 +1,10 @@
+package(default_visibility = ["//visibility:public"])
+
+cc_library(
+    name = "slirp",
+    srcs = glob(["*.c"]),
+    hdrs = glob(["*.h"]),
+    includes = [".."],
+    deps = ["//src/core:utils"],
+    copts = select({"@platforms//os:windows": ["-mno-ms-bitfields"], "//conditions:default": []}),
+)

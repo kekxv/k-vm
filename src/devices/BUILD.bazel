@@ -1,0 +1,9 @@
+load("//build:defs.bzl", "vm_library")
+
+package(default_visibility = ["//visibility:public"])
+
+vm_library(
+    name = "devices",
+    srcs = ["ide.c", "pci.c", "pckbd.c", "ps2.c", "simplefb.c", "vga.c", "virtio.c", "vmmouse.c"],
+    deps = ["//src/core:utils", "//src/storage:storage"],
+)

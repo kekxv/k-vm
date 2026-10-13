@@ -1,0 +1,21 @@
+load("//build:defs.bzl", "vm_library")
+
+package(default_visibility = ["//visibility:public"])
+
+vm_library(
+    name = "network",
+    srcs = ["host_network.c"],
+    hdrs = ["host_network.h"],
+    includes = ["."],
+    linkopts = select({
+        "@platforms//os:windows": [
+            "-lws2_32",
+            "-liphlpapi",
+        ],
+        "//conditions:default": [],
+    }),
+    deps = [
+        "//src/core:utils",
+        "//third_party/slirp",
+    ],
+)

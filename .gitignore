@@ -1,0 +1,10 @@
+/bazel-*
+*.o
+*.d
+__pycache__/
+
+/images/
+/out/
+/dist/
+/a.out
+/.worktrees/

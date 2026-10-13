@@ -1,0 +1,26 @@
+load("//build:defs.bzl", "vm_library")
+
+package(default_visibility = ["//visibility:public"])
+
+vm_library(
+    name = "utils",
+    srcs = [
+        "cutils.c",
+        "iomem.c",
+        "json.c",
+    ],
+)
+
+vm_library(
+    name = "machine",
+    srcs = ["machine.c"],
+    deps = [
+        ":utils",
+        "//src/arch/riscv",
+        "//src/devices",
+        "//src/storage",
+    ] + select({
+        "@platforms//os:windows": ["//src/storage:win32_files"],
+        "//conditions:default": [],
+    }),
+)
