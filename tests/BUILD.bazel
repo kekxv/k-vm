@@ -230,3 +230,15 @@ cc_test(
         "//src/include:headers",
     ],
 )
+
+# Darwin rejects O_NOFOLLOW_ANY combined with O_NOFOLLOW. Exercise that
+# platform branch on Linux using the kernel's flag-validation contract.
+cc_test(
+    name = "host_io_darwin_flags_test",
+    size = "small",
+    srcs = ["host_io_darwin_flags_test.c", "//src/storage:host_io_posix.c", "//src/storage:host_io.h"],
+    copts = ["-D__APPLE__", "-DO_NOFOLLOW_ANY=0x20000000"],
+    linkopts = ["-Wl,--wrap=openat", "-Wl,--wrap=openat64"],
+    deps = ["//src/include:headers"],
+    target_compatible_with = ["@platforms//os:linux"],
+)

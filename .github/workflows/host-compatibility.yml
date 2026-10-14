@@ -16,8 +16,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: sudo apt-get update && sudo apt-get install -y e2fsprogs
-      - run: python3 tools/prepare_linux_image.py --output images/ci-riscv64
-      - run: python3 tests/win32_update_check.py --image images/ci-riscv64 --prepare images/ci-update-riscv64
+      - run: python3 tools/ci_run.py -- python3 tools/prepare_linux_image.py --output images/ci-riscv64
+      - run: python3 tools/ci_run.py -- python3 tests/win32_update_check.py --image images/ci-riscv64 --prepare images/ci-update-riscv64
       - uses: actions/upload-artifact@v4
         with:
           name: windows-riscv64-fixture
@@ -26,6 +26,13 @@ jobs:
         with:
           name: windows-update-fixture
           path: images/ci-update-riscv64/
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-logs-windows-fixture
+          path: ${{ runner.temp }}/k-vm-ci-logs/
+          if-no-files-found: ignore
   win32:
     runs-on: windows-latest
     needs: windows-fixture
@@ -35,14 +42,7 @@ jobs:
       - name: Native Bazel build and tests
         shell: pwsh
         run: |
-          bazel test --config=win32 //...
-      - name: Upload failed Bazel test logs
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-logs-win32
-          path: bazel-testlogs/**/test.log
-          if-no-files-found: ignore
+          python tools/ci_run.py --bazel -- bazel test --config=win32 //...
       - uses: actions/download-artifact@v4
         with:
           name: windows-riscv64-fixture
@@ -53,10 +53,17 @@ jobs:
           path: images/ci-update-riscv64
       - name: Native guest mappings, networking and terminal
         shell: pwsh
-        run: python tests/win32_guest_check.py --binary bazel-bin/k-vm.exe --image images/ci-riscv64
+        run: python tools/ci_run.py -- python tests/win32_guest_check.py --binary bazel-bin/k-vm.exe --image images/ci-riscv64
       - name: Native guest transactional updates
         shell: pwsh
-        run: python tests/win32_update_check.py --binary bazel-bin/k-vm.exe --image images/ci-update-riscv64
+        run: python tools/ci_run.py -- python tests/win32_update_check.py --binary bazel-bin/k-vm.exe --image images/ci-update-riscv64
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-logs-win32
+          path: ${{ runner.temp }}/k-vm-ci-logs/
+          if-no-files-found: ignore
   native:
     strategy:
       fail-fast: false
@@ -81,21 +88,23 @@ jobs:
           curl -fsSL https://github.com/bazelbuild/bazelisk/releases/download/v1.27.0/bazelisk-linux-amd64 -o "$RUNNER_TEMP/bazel"
           chmod +x "$RUNNER_TEMP/bazel"
           echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - name: Test CI failure reporting
+        run: python3 tests/ci_run_test.py
       - name: Native build and tests
-        run: bazel test --test_env=PATH //...
+        run: python3 tools/ci_run.py --bazel -- bazel test --test_env=PATH //...
       - name: Prepare shell fixture
-        run: python3 tools/prepare_linux_image.py --output images/ci-riscv64
+        run: python3 tools/ci_run.py -- python3 tools/prepare_linux_image.py --output images/ci-riscv64
       - name: Guest files, terminal and updates
         run: |
-          python3 tests/agent_workspace_check.py --image images/ci-riscv64
-          python3 tests/pi_update_check.py --image images/ci-riscv64
-          python3 tests/agent_dispatch_check.py --image images/ci-riscv64
+          python3 tools/ci_run.py -- python3 tests/agent_workspace_check.py --image images/ci-riscv64
+          python3 tools/ci_run.py -- python3 tests/pi_update_check.py --image images/ci-riscv64
+          python3 tools/ci_run.py -- python3 tests/agent_dispatch_check.py --image images/ci-riscv64
       - name: SDL build and tests
-        run: bazel test --config=sdl --test_env=PATH //...
-      - name: Upload failed Bazel test logs
+        run: python3 tools/ci_run.py --bazel -- bazel test --config=sdl --test_env=PATH //...
+      - name: Upload failure diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: test-logs-${{ matrix.os }}
-          path: bazel-testlogs/**/test.log
+          name: failure-logs-${{ matrix.os }}
+          path: ${{ runner.temp }}/k-vm-ci-logs/
           if-no-files-found: ignore

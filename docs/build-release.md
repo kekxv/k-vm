@@ -78,3 +78,5 @@ git push origin v0.1.0
 ```
 
 本地创建仓库不会执行远程 CI。本文命令中的账号需替换为你的实际仓库地址。
+
+CI 构建、测试和客户机检查失败时，会在 GitHub Actions 的 Summary 中列出失败命令、退出码、命令输出末尾和失败测试日志（可展开）。完整命令输出、Bazel 构建事件及失败测试日志会上传为 `failure-logs-*` 产物；Summary 中超长日志会截断，完整日志以产物为准。测试日志根据 Bazel 构建事件定位，不依赖 Windows 的 `bazel-testlogs` 链接。

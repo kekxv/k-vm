@@ -29,7 +29,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y e2fsprogs binutils
       - name: Build and test portable runtime
         run: |
-          bazel test --config=linux-amd64-musl \
+          python3 tools/ci_run.py --bazel -- bazel test --config=linux-amd64-musl \
             //:k-vm //tests:network_test //tests:confined_fs_test \
             //tests:block_file_test //tests:image_update_test //tests:workspace_test \
             //tests:portable_confined_fs_test //tests:portable_image_update_test \
@@ -40,24 +40,32 @@ jobs:
           # Finish with amd64/musl for the guest checks below.
           for arch in arm64 amd64; do
             for libc in glibc musl; do
-              bazel build --config=linux-$arch-$libc //:k-vm
-              python3 tools/package_linux.py --arch "$arch" --libc "$libc" --glibc 2.28
+              python3 tools/ci_run.py --bazel -- bazel build --config=linux-$arch-$libc //:k-vm
+              python3 tools/ci_run.py -- python3 tools/package_linux.py --arch "$arch" --libc "$libc" --glibc 2.28
             done
           done
       - name: Prepare reference guest
-        run: python3 tools/prepare_linux_image.py --output images/ci-riscv64
+        run: python3 tools/ci_run.py -- python3 tools/prepare_linux_image.py --output images/ci-riscv64
       - name: Guest mappings, networking, command interruption and updates
         run: |
-          python3 tests/agent_workspace_check.py --image images/ci-riscv64
-          python3 tests/linux_sandbox_check.py --image images/ci-riscv64
-          python3 tests/pi_update_check.py --image images/ci-riscv64
-          python3 tests/pi_init_check.py --image images/ci-riscv64
-          python3 tests/agent_dispatch_check.py --image images/ci-riscv64
+          python3 tools/ci_run.py -- python3 tests/agent_workspace_check.py --image images/ci-riscv64
+          python3 tools/ci_run.py -- python3 tests/linux_sandbox_check.py --image images/ci-riscv64
+          python3 tools/ci_run.py -- python3 tests/pi_update_check.py --image images/ci-riscv64
+          python3 tools/ci_run.py -- python3 tests/pi_init_check.py --image images/ci-riscv64
+          python3 tools/ci_run.py -- python3 tests/agent_dispatch_check.py --image images/ci-riscv64
       - uses: actions/upload-artifact@v4
         with:
           name: k-vm-linux
           path: dist/*
           if-no-files-found: error
+
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-logs-linux-build
+          path: ${{ runner.temp }}/k-vm-ci-logs/
+          if-no-files-found: ignore
 
   base-image:
     name: RISC-V base image
@@ -80,7 +88,9 @@ jobs:
           platforms: riscv64
       - name: Identify boot component cache
         id: boot-cache-key
-        run: echo "key=$(python3 tools/prepare_agent_image.py --print-boot-cache-key)" >> "$GITHUB_OUTPUT"
+        run: |
+          key=$(python3 tools/ci_run.py -- python3 tools/prepare_agent_image.py --print-boot-cache-key)
+          echo "key=$key" >> "$GITHUB_OUTPUT"
       - name: Cache Linux and OpenSBI binaries
         uses: actions/cache@v4
         with:
@@ -90,21 +100,21 @@ jobs:
             k-vm-boot-${{ runner.os }}-
       - name: Test image preparation and packaging
         run: |
-          python3 tools/agent_image/test_prepare.py
-          python3 tests/pi_install_test.py
-          python3 tests/package_image_test.py
+          python3 tools/ci_run.py -- python3 tools/agent_image/test_prepare.py
+          python3 tools/ci_run.py -- python3 tests/pi_install_test.py
+          python3 tools/ci_run.py -- python3 tests/package_image_test.py
       - name: Build portable emulator
-        run: bazel build --config=linux-amd64-musl //:k-vm
+        run: python3 tools/ci_run.py --bazel -- bazel build --config=linux-amd64-musl //:k-vm
       - name: Build base image without Node.js or Pi
         # Extract as root to preserve guest Unix ownership inside the ext4 disk.
-        run: sudo python3 tools/prepare_agent_image.py --output images/base-riscv64 --build-cache "$RUNNER_TEMP/k-vm-riscv-build"
+        run: python3 tools/ci_run.py -- sudo python3 tools/prepare_agent_image.py --output images/base-riscv64 --build-cache "$RUNNER_TEMP/k-vm-riscv-build"
       - name: Check base guest workspace and command interruption
-        run: python3 tests/agent_workspace_check.py --image images/base-riscv64
+        run: python3 tools/ci_run.py -- python3 tests/agent_workspace_check.py --image images/base-riscv64
       - name: Package sparse image and verify checksum
         run: |
-          python3 tools/package_image.py --image images/base-riscv64
+          python3 tools/ci_run.py -- python3 tools/package_image.py --image images/base-riscv64
           cd dist
-          sha256sum --check k-vm-base-riscv64.tar.xz.sha256
+          python3 ../tools/ci_run.py -- sha256sum --check k-vm-base-riscv64.tar.xz.sha256
       - uses: actions/upload-artifact@v4
         with:
           name: k-vm-base-riscv64
@@ -113,6 +123,14 @@ jobs:
             dist/k-vm-base-riscv64.tar.xz.sha256
           compression-level: 0
           if-no-files-found: error
+
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-logs-base-image
+          path: ${{ runner.temp }}/k-vm-ci-logs/
+          if-no-files-found: ignore
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')

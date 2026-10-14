@@ -30,9 +30,10 @@ int host_open_directory(int root, const char *path)
 {
     if (!valid_path(path)) return -1;
 #ifdef __APPLE__
-    /* Required SDK/kernel feature; do not silently downgrade on older Darwin. */
+    /* Darwin rejects combining O_NOFOLLOW_ANY with O_NOFOLLOW (EINVAL).
+     * O_NOFOLLOW_ANY already rejects symlinks in every path component. */
     return openat(root, *path ? path : ".", O_RDONLY | O_DIRECTORY |
-                  O_NOFOLLOW | O_NOFOLLOW_ANY | O_CLOEXEC);
+                  O_NOFOLLOW_ANY | O_CLOEXEC);
 #else
     int fd = openat(root, ".", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
     if (fd < 0) return -1;
