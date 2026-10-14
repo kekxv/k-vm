@@ -1,8 +1,15 @@
 name: Host compatibility
 on:
   push:
+    branches: [main]
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: host-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 jobs:
   windows-fixture:
     runs-on: ubuntu-24.04
@@ -24,18 +31,18 @@ jobs:
     needs: windows-fixture
     steps:
       - uses: actions/checkout@v4
-      - uses: msys2/setup-msys2@v2
-        id: msys2
-        with:
-          msystem: MINGW64
-          update: true
-          install: mingw-w64-x86_64-gcc mingw-w64-x86_64-python
       - uses: bazel-contrib/setup-bazel@0.14.0
       - name: Native Bazel build and tests
         shell: pwsh
         run: |
-          $env:BAZEL_SH = '${{ steps.msys2.outputs.msys2-location }}/usr/bin/bash.exe'
           bazel test --config=win32 //...
+      - name: Upload failed Bazel test logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-win32
+          path: bazel-testlogs/**/test.log
+          if-no-files-found: ignore
       - uses: actions/download-artifact@v4
         with:
           name: windows-riscv64-fixture
@@ -44,15 +51,12 @@ jobs:
         with:
           name: windows-update-fixture
           path: images/ci-update-riscv64
-      - name: Build native EXE and run native unit tests
-        shell: msys2 {0}
-        run: python tools/build_win32.py --test
       - name: Native guest mappings, networking and terminal
-        shell: msys2 {0}
-        run: python tests/win32_guest_check.py --binary out/win32/k-vm.exe --image images/ci-riscv64
+        shell: pwsh
+        run: python tests/win32_guest_check.py --binary bazel-bin/k-vm.exe --image images/ci-riscv64
       - name: Native guest transactional updates
-        shell: msys2 {0}
-        run: python tests/win32_update_check.py --binary out/win32/k-vm.exe --image images/ci-update-riscv64
+        shell: pwsh
+        run: python tests/win32_update_check.py --binary bazel-bin/k-vm.exe --image images/ci-update-riscv64
   native:
     strategy:
       fail-fast: false
@@ -67,7 +71,9 @@ jobs:
       - name: macOS dependencies
         if: runner.os == 'macOS'
         run: |
-          brew install bazelisk openssl@3 e2fsprogs sdl12-compat
+          brew install bazelisk openssl@3 e2fsprogs sdl12-compat coreutils
+          # Installer regression tests use the same SHA256 utility as the guest.
+          echo "$(brew --prefix coreutils)/libexec/gnubin" >> "$GITHUB_PATH"
           echo "$(brew --prefix e2fsprogs)/sbin" >> "$GITHUB_PATH"
           echo "build --copt=-I$(brew --prefix openssl@3)/include" >> .bazelrc
           echo "build --linkopt=-L$(brew --prefix openssl@3)/lib" >> .bazelrc
@@ -80,7 +86,7 @@ jobs:
           chmod +x "$RUNNER_TEMP/bazel"
           echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
       - name: Native build and tests
-        run: bazel test //...
+        run: bazel test --test_env=PATH //...
       - name: Prepare shell fixture
         run: python3 tools/prepare_linux_image.py --output images/ci-riscv64
       - name: Guest files, terminal and updates
@@ -89,4 +95,11 @@ jobs:
           python3 tests/pi_update_check.py --image images/ci-riscv64
           python3 tests/agent_dispatch_check.py --image images/ci-riscv64
       - name: SDL build and tests
-        run: bazel test --config=sdl //...
+        run: bazel test --config=sdl --test_env=PATH //...
+      - name: Upload failed Bazel test logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-${{ matrix.os }}
+          path: bazel-testlogs/**/test.log
+          if-no-files-found: ignore

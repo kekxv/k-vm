@@ -7,11 +7,19 @@ build --copt=-fno-strict-aliasing
 build:sdl --define=sdl=true
 test --test_output=errors
 
-# Optional native MSYS2 MinGW-w64 toolchain (run Bazel from Windows).
-build:win32 --compiler=mingw-gcc
-build:win32 --cpu=x64_windows
-build:win32 --platforms=//build:win32
-build:win32 --incompatible_enable_cc_toolchain_resolution=false
+# Native Win32 executable, hermetic Zig/Clang + bundled MinGW runtime.
+# Cross-build on Linux/macOS or build and test directly on Windows.
+build:win32 --incompatible_enable_cc_toolchain_resolution=true
+build:win32 --dynamic_mode=off
+build:win32 --linkopt=-nostdlib++
+build:win32 --platforms=@zig_sdk//platform:windows_amd64
+build:win32 --extra_toolchains=@zig_sdk//toolchain:windows_amd64
+
+# Optional system MSYS2 GCC build for comparison.
+build:win32-mingw --compiler=mingw-gcc
+build:win32-mingw --cpu=x64_windows
+build:win32-mingw --platforms=//build:win32
+build:win32-mingw --incompatible_enable_cc_toolchain_resolution=false
 
 # Portable terminal releases: local images/exports, guest SLIRP still enabled.
 build:portable --define=local_only=true

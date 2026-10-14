@@ -5,7 +5,7 @@
 默认 `bazel build //:k-vm` 使用宿主系统编译器，需要 curl/OpenSSL 开发库，支持旧版 HTTP 配置、磁盘和远程文件系统。
 Hermetic 发布配置仅编译本地存储后端，保留沙盒、9P、TAP/SLIRP、客户机 HTTPS 和 Pi 更新。
 它使用 hermetic_cc_toolchain **4.3.0** 的 Zig/Clang/libc，不链接构建机的 curl、OpenSSL 或 glibc。
-模块没有全局注册 hermetic 工具链：只有选择相应 `--config` 才会启用，不干扰 macOS/Win32 系统构建。
+模块没有全局注册 hermetic 工具链：只有选择相应 `--config` 才会启用，默认 macOS/Linux 系统构建不受影响；`--config=win32` 也使用 hermetic 工具链。
 
 **四种发布版本都支持沙盒内部 HTTPS**，包括 Pi 模型 API、npm registry 下载及 `k-vm update`。
 SLIRP 转发客户机网络流量，TLS 和证书验证由客户机内的 Node.js、curl 等客户端完成，
@@ -46,10 +46,10 @@ Bazel 7.4.1 固定在 `.bazelversion`；工具链模块及其校验由 `MODULE.b
 
 `.github/workflows/linux-release.yml`：
 
-1. main 推送、PR、手动运行：在原生 x86_64 / ARM64 Linux runner 上构建四种产物，运行核心测试、ELF ABI 检查与实际 RISC-V 客户机检查。
-2. 每个构建上传独立 tar.gz 与 SHA256，运行检查覆盖 Pi 初始化、自动启动和更新事务，不需要 Pi 认证或真实 npm 安装。
+1. main 推送、PR、手动运行：在一个 x86_64 Linux runner 上交叉构建四种产物，共用工具链缓存；核心测试与实际 RISC-V 客户机检查仅在 amd64/musl 上运行一次，每种产物分别检查 ELF ABI。ARM64 产物不在此工作流中执行原生测试。
+2. 统一上传 `k-vm-linux` 工作流产物，内含四组独立 tar.gz 与 SHA256，运行检查覆盖 Pi 初始化、自动启动和更新事务，不需要 Pi 认证或真实 npm 安装。
 3. 独立镜像 job 交叉编译内核与 OpenSBI，使用 Docker/QEMU 准备 Debian RV64 基础系统；验证客户机文件映射和命令中断后，上传 `k-vm-base-riscv64` 产物（tar.xz 和 SHA256）。不预装 Node.js/Pi，不包含宿主认证文件。
-4. `v*` 标签：四项程序构建及基础镜像构建全部成功后下载所有产物、再次检查 SHA256，创建或更新该标签的 GitHub Release。
+4. `v*` 标签：程序打包 job 及基础镜像 job 全部成功后下载所有产物、再次检查 SHA256，创建或更新该标签的 GitHub Release。
 
 基础镜像包包含启动配置、构建来源、内核配置、内核、固件和根磁盘。打包使用 GNU sparse tar + xz，保留 4 GiB 逻辑磁盘的稀疏区域；本机压缩后约 53.2 MiB，实际大小随构建版本变化。
 本地准备并打包：
@@ -63,7 +63,7 @@ sha256sum --check k-vm-base-riscv64.tar.xz.sha256
 
 解压后使用 `--image ./k-vm-base-riscv64` 进入 shell 或初始化 Pi，参见 README。
 没有部署服务器。PR 仅有只读仓库权限；Release job 单独获得 `contents: write`。
-现有 `host-compatibility.yml` 继续检查系统工具链、macOS、Windows 和 SDL。
+现有 `host-compatibility.yml` 继续检查系统工具链、macOS、Windows 和 SDL。Windows 使用 `bazel test --config=win32 //...`，由同一 hermetic 模块提供 Zig/Clang 与 MinGW 运行库，不再安装 MSYS2/GCC 或重复编译。Linux/macOS 可用该配置交叉编译 Windows EXE；原生 Windows runner 负责执行测试。
 
 要启用 GitHub 工作流，需要把本地仓库推送到你创建的 GitHub 仓库：
 

@@ -16,34 +16,34 @@ concurrency:
 
 jobs:
   build:
-    name: ${{ matrix.arch }} / ${{ matrix.libc }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - {arch: amd64, libc: glibc, runner: ubuntu-24.04}
-          - {arch: amd64, libc: musl, runner: ubuntu-24.04}
-          - {arch: arm64, libc: glibc, runner: ubuntu-24.04-arm}
-          - {arch: arm64, libc: musl, runner: ubuntu-24.04-arm}
-    runs-on: ${{ matrix.runner }}
+    name: Linux packages (amd64 + arm64)
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: bazel-contrib/setup-bazel@0.14.0
         with:
           bazelisk-cache: true
-          disk-cache: ${{ github.workflow }}-${{ matrix.arch }}-${{ matrix.libc }}
+          disk-cache: ${{ github.workflow }}-linux-packages
           repository-cache: true
       - name: Install guest fixture tools
         run: sudo apt-get update && sudo apt-get install -y e2fsprogs binutils
       - name: Build and test portable runtime
         run: |
-          bazel test --config=linux-${{ matrix.arch }}-${{ matrix.libc }} \
+          bazel test --config=linux-amd64-musl \
             //:k-vm //tests:network_test //tests:confined_fs_test \
             //tests:block_file_test //tests:image_update_test //tests:workspace_test \
             //tests:portable_confined_fs_test //tests:portable_image_update_test \
             //tests:portable_workspace_test //tests:sandbox_test //tests:pi_install_test //tests:initialize_test
-      - name: Validate ELF ABI and package
-        run: python3 tools/package_linux.py --arch '${{ matrix.arch }}' --libc '${{ matrix.libc }}' --glibc 2.28
+      - name: Cross-build, validate ELF ABI and package all variants
+        run: |
+          # Package immediately: bazel-bin follows the most recent configuration.
+          # Finish with amd64/musl for the guest checks below.
+          for arch in arm64 amd64; do
+            for libc in glibc musl; do
+              bazel build --config=linux-$arch-$libc //:k-vm
+              python3 tools/package_linux.py --arch "$arch" --libc "$libc" --glibc 2.28
+            done
+          done
       - name: Prepare reference guest
         run: python3 tools/prepare_linux_image.py --output images/ci-riscv64
       - name: Guest mappings, networking, command interruption and updates
@@ -55,7 +55,7 @@ jobs:
           python3 tests/agent_dispatch_check.py --image images/ci-riscv64
       - uses: actions/upload-artifact@v4
         with:
-          name: k-vm-linux-${{ matrix.arch }}-${{ matrix.libc }}
+          name: k-vm-linux
           path: dist/*
           if-no-files-found: error
 

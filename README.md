@@ -88,7 +88,7 @@ Pi 的正式运行时是 Node.js（要求 Node.js 22.19 或更高版本）。Pi 
 
 ## Linux 发行版与构建
 
-GitHub Actions 自动构建以下版本，上传工作流产物；`v*` 标签触发 Release 和 SHA256 发布。
+GitHub Actions 在一个 Linux job 中交叉构建以下四种版本，统一上传 `k-vm-linux` 产物；`v*` 标签触发 Release 和 SHA256 发布。
 仓库创建到 GitHub 并推送后，工作流才会实际运行。
 基础镜像独立构建一次，上传为 `k-vm-base-riscv64` 产物，并随标签发布；
 它包含内核、固件、基础系统和初始化脚本，未预装 Node.js/Pi，可供 Linux、macOS 和原生 Windows 使用。
@@ -135,16 +135,16 @@ bazel test //...
 ## macOS 与 Windows
 
 macOS 使用 Xcode Command Line Tools、Bazelisk、curl/OpenSSL；支持 Apple Silicon 和 Intel。
-Windows 10/11 x64 使用 MinGW-w64 构建原生 EXE，不需要 WSL：
+Windows 10/11 x64 使用 `hermetic_cc_toolchain 4.3.0` 的 Zig/Clang 构建原生 EXE，不需要 WSL：
 
 ```powershell
-# 已安装 MSYS2 MINGW64 和 Bazelisk
-$env:BAZEL_SH = 'C:/msys64/usr/bin/bash.exe'
+# 已安装 Bazelisk，无需安装 MSYS2/GCC
 bazel test --config=win32 //...
 .\bazel-bin\k-vm.exe sandbox --image C:\vm-images\pi-riscv64 --agent pi
 ```
 
-也可在 MSYS2 MINGW64 中运行 `python tools/build_win32.py --test`。
+Linux/macOS 可用 `bazel build --config=win32 //:k-vm` 交叉构建同一 EXE。
+工具链自带 MinGW 头文件和运行库；MSYS2/GCC 的独立脚本保留为可选构建方式。
 [各平台依赖、映射语义与限制](docs/usage.md#宿主机兼容)。
 
 ## 项目与边界

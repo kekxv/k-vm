@@ -273,7 +273,7 @@ agent_dispatch_check 使用客户机内的测试程序验证调度和配置白�
 | --- | --- | --- |
 | Linux 64 位 | 原生可执行程序 | `openat2`；SLIRP 或 Linux TAP |
 | macOS 13+，Apple Silicon / Intel | 原生构建 | `openat` + `O_NOFOLLOW_ANY`；SLIRP |
-| Windows 10/11 x64 | 原生 `k-vm.exe`，MinGW-w64 构建 | Win32 HANDLE / 9P；Winsock / SLIRP |
+| Windows 10/11 x64 | 原生 `k-vm.exe`，hermetic Zig/Clang 构建 | Win32 HANDLE / 9P；Winsock / SLIRP |
 
 文件访问已拆成 Linux、macOS/POSIX 和 Win32 后端，Bazel 按目标平台选择；配置导入也复用这些后端。
 两者均拒绝路径穿越、符号链接访问、设备/FIFO 等特殊文件，并保留只读策略；macOS 在打开后
@@ -301,24 +301,26 @@ bazel build //:k-vm \
 可在 Linux 构建镜像后将整个目录复制到 macOS 或 Windows。旧 shell 参考镜像可在 macOS 准备，
 先将 Homebrew `e2fsprogs` 的 `sbin` 加入 PATH。SDL 构建另需 `sdl12-compat` 的 include/lib 路径。
 
-Windows 原生构建使用 MSYS2 的 **MINGW64** 环境和 GCC（MSVC 不支持模拟器所需的 `__int128`）：
-
-```sh
-pacman -S --needed mingw-w64-x86_64-gcc mingw-w64-x86_64-python
-python tools/build_win32.py --test
-```
-
-项目也提供原生 Windows Bazel 配置，安装 Bazelisk 后在 PowerShell 中执行：
+Windows 默认使用 `hermetic_cc_toolchain 4.3.0` 的 Zig/Clang 与内置 MinGW 头文件和运行库，
+无需单独安装 MSYS2/GCC（MSVC 不支持模拟器所需的 `__int128`）。安装 Bazelisk 后在 PowerShell 中执行：
 
 ```powershell
-$env:BAZEL_SH = 'C:/msys64/usr/bin/bash.exe'
 bazel test --config=win32 //...
 .\bazel-bin\k-vm.exe sandbox --image C:\vm-images\pi-riscv64 --agent pi
 ```
 
-Linux 上可交叉构建同一 EXE：`python3 tools/build_win32.py --cc x86_64-w64-mingw32-gcc`。
+Linux/macOS 也可交叉构建原生 EXE：
 
-产物 `out/win32/k-vm.exe` 可直接从 PowerShell/cmd 运行，运行时不需要 MSYS2、WSL、
+```sh
+bazel build --config=win32 //:k-vm
+```
+
+Windows CI 使用同一 hermetic 配置运行原生单元测试及客户机检查，不再重复用 GCC 编译。
+交叉编译只能构建 Windows 测试；执行这些测试需要 Windows 或 Wine。
+可选 MSYS2/GCC 构建仍支持 `bazel test --config=win32-mingw //...`，
+或在 MINGW64 中运行 `python tools/build_win32.py --test`；后者输出到 `out/win32/k-vm.exe`。
+
+产物 `bazel-bin/k-vm.exe` 可直接从 PowerShell/cmd 运行，运行时不需要 MSYS2、WSL、
 Hyper-V 或 `/dev/kvm`。将 EXE 放入 PATH，或与 `tools/k-vm.cmd` 放在同一目录：
 
 ```powershell

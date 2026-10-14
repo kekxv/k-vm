@@ -30,7 +30,7 @@ vm_library(
     ],
     includes = ["."],
     linkopts = select({
-        "@platforms//os:windows": ["-ladvapi32"],
+        "@platforms//os:windows": ["-ladvapi32", "-lbcrypt"],
         "//conditions:default": [],
     }),
     deps = [":initialize"] + select({
