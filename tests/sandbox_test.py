@@ -7,6 +7,7 @@ import signal
 import termios
 import os
 import struct
+import sys
 import subprocess
 import tempfile
 import time
@@ -232,7 +233,15 @@ class SandboxTest(unittest.TestCase):
             self.assertIsNone(proc.poll(), "Ctrl+C must not stop the sandbox")
             proc.send_signal(signal.SIGTERM)
             self.assertEqual(proc.wait(timeout=5), 0)
-            self.assertEqual(termios.tcgetattr(slave), original)
+            restored = termios.tcgetattr(slave)
+            expected = original.copy()
+            if sys.platform == "darwin":
+                # Darwin sets PENDIN when raw input returns to canonical mode.
+                # It is transient kernel queue state, not a terminal setting;
+                # preserve queued input rather than flushing it just for equality.
+                restored[3] &= ~termios.PENDIN
+                expected[3] &= ~termios.PENDIN
+            self.assertEqual(restored, expected, "host terminal settings were not restored")
             self.assertEqual(fcntl.fcntl(slave, fcntl.F_GETFL), original_flags)
         finally:
             if proc.poll() is None:
