@@ -75,10 +75,6 @@ jobs:
           # Installer regression tests use the same SHA256 utility as the guest.
           echo "$(brew --prefix coreutils)/libexec/gnubin" >> "$GITHUB_PATH"
           echo "$(brew --prefix e2fsprogs)/sbin" >> "$GITHUB_PATH"
-          echo "build --copt=-I$(brew --prefix openssl@3)/include" >> .bazelrc
-          echo "build --linkopt=-L$(brew --prefix openssl@3)/lib" >> .bazelrc
-          echo "build --copt=-I$(brew --prefix sdl12-compat)/include" >> .bazelrc
-          echo "build --linkopt=-L$(brew --prefix sdl12-compat)/lib" >> .bazelrc
       - name: Install Bazelisk on Linux
         if: runner.os == 'Linux'
         run: |

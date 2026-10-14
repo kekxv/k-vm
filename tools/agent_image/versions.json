@@ -1,0 +1,10 @@
+{
+  "linux": {
+    "version": "7.2.10",
+    "sha256": "2feaa70453e91f541be6a5c9078d8168e081af45a3d9718054850538cff2ebf3"
+  },
+  "opensbi": {
+    "version": "1.9",
+    "sha256": "f6c4985843d6d878b5b511d7d7a930b6b541d3d9305371f2d9780765428f66f4"
+  }
+}

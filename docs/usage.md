@@ -42,11 +42,20 @@ k-vm sandbox --image ./k-vm-base-riscv64 --agent shell
 k-vm init --image ./k-vm-base-riscv64 --agent pi
 ```
 
-镜像准备时自动选择 kernel.org 的最新稳定内核（排除 RC），可以用 `--kernel-version X.Y.Z` 固定版本。
+镜像准备默认读取 `tools/agent_image/versions.json` 中固定的 Linux/OpenSBI 版本与源码 SHA256。
+更新该文件才升级默认版本；`--kernel-version latest` 可临时选择 kernel.org 最新稳定内核，
+`--kernel-version X.Y.Z` 可临时指定版本，也可用 `--versions FILE` 指定完整版本清单。
 本次验证镜像为 Linux 7.2.10、OpenSBI 1.9、Debian 13、Node.js 24.21.0、Pi 1.2.0。
 OpenSBI 1.9 包含本地 HTIF MMIO `volatile` 修补，避免关机写入被编译器优化掉。
 准备工具交叉编译 Linux 和 OpenSBI，提供 Pi 初始化脚本；`--with-pi` 才会预装 Node.js RV64 社区构建与 Pi。
-Node.js 下载在构建或初始化时检查发布者 SHA256。
+Node.js 使用 unofficial-builds.nodejs.org 提供的 RV64 预编译包，构建或初始化时下载并检查发布者 SHA256；不编译 Node.js 源码，也不通过 apt 安装。Pi 使用 npm 安装。基础镜像只包含按需安装脚本。
+
+内核和 OpenSBI 的二进制分别缓存在 `--build-cache` 指定目录的 `boot/` 下，默认缓存目录为
+`${XDG_CACHE_HOME:-~/.cache}/k-vm/riscv-build`。命中缓存时不访问下载服务器、不调用 make；
+版本、源码 SHA256、构建脚本或编译器变化时失效，缺失或损坏的产物也会重新构建。
+缓存只在构建完整成功后保存，每次复用都会验证文件 SHA256；中断不会留下可用的半成品。
+基础镜像系统仍由 Docker 准备，启动组件缓存不包含根磁盘或用户配置。
+
 构建时需要 Docker、RV64 binfmt/QEMU user、交叉编译器、`mke2fs` 和网络：
 
 ```sh
@@ -291,15 +300,13 @@ macOS 构建（Xcode Command Line Tools 和 Homebrew）：
 ```sh
 xcode-select --install
 brew install bazelisk openssl@3 e2fsprogs
-bazel build //:k-vm \
-  --copt="-I$(brew --prefix openssl@3)/include" \
-  --linkopt="-L$(brew --prefix openssl@3)/lib"
+bazel build //:k-vm
 ./bazel-bin/k-vm sandbox --image /path/to/pi-riscv64 --agent pi
 ```
 
 运行现有镜像无需 Docker。现代镜像准备工具目前使用 Linux 交叉编译工具链；
 可在 Linux 构建镜像后将整个目录复制到 macOS 或 Windows。旧 shell 参考镜像可在 macOS 准备，
-先将 Homebrew `e2fsprogs` 的 `sbin` 加入 PATH。SDL 构建另需 `sdl12-compat` 的 include/lib 路径。
+先将 Homebrew `e2fsprogs` 的 `sbin` 加入 PATH。SDL 构建另需 `brew install sdl12-compat`。Homebrew 头文件和库通过 Bazel 外部仓库声明，无需手工追加绝对 `-I/-L` 路径。
 
 Windows 默认使用 `hermetic_cc_toolchain 4.3.0` 的 Zig/Clang 与内置 MinGW 头文件和运行库，
 无需单独安装 MSYS2/GCC（MSVC 不支持模拟器所需的 `__int128`）。安装 Bazelisk 后在 PowerShell 中执行：
@@ -358,7 +365,7 @@ bazel test //...
 bazel run //:k-vm -- -h
 ```
 
-`.bazelversion` 固定 Bazel 7.4.1，由 Bazelisk 选择该版本。`MODULE.bazel` 定义模块
+`.bazelversion` 固定 Bazel 9.3.0，由 Bazelisk 选择该版本。`MODULE.bazel` 定义模块
 `k_vm`（Bazel 模块名不能包含连字符），可执行程序名为 `k-vm`。
 当前 curl、OpenSSL 和可选 SDL 使用系统头文件与动态库，构建并非完全 hermetic；
 SLIRP 源码随项目提供。首次构建需联网下载 Bazel 及 Bazel 工具链规则。

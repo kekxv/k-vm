@@ -172,7 +172,8 @@ static HANDLE relative_one(HANDLE root, const wchar_t *name, DWORD access,
                                                     : 1;
     HANDLE h;
     IO_STATUS_BLOCK io;
-    NTSTATUS st = fn(&h, access | SYNCHRONIZE, &oa, &io, NULL,
+    /* checked() queries metadata; native Windows enforces this access bit. */
+    NTSTATUS st = fn(&h, access | FILE_READ_ATTRIBUTES | SYNCHRONIZE, &oa, &io, NULL,
                      FILE_ATTRIBUTE_NORMAL, share, disp,
                      FILE_OPEN_REPARSE_POINT | FILE_SYNCHRONOUS_IO_NONALERT |
                          (dir == 1   ? FILE_DIRECTORY_FILE
@@ -404,12 +405,23 @@ int kv_win32_rename_handle(HANDLE source, HANDLE directory, const char *name) {
         errno = ENOMEM;
         return -1;
     }
-    info->ReplaceIfExists = TRUE;
+    /* FileRenameInformationEx uses ULONG Flags in place of BOOLEAN
+     * ReplaceIfExists. POSIX replacement allows an open destination, and
+     * IGNORE_READONLY_ATTRIBUTE preserves the destination's old metadata. */
+    ULONG flags = 0x1 | 0x2 | 0x40;
+    memcpy(info, &flags, sizeof(flags));
     info->RootDirectory = directory;
     info->FileNameLength = len;
     memcpy(info->FileName, w, len);
     IO_STATUS_BLOCK io;
-    NTSTATUS status = set(source, &io, info, size, (FILE_INFORMATION_CLASS)10);
+    NTSTATUS status = set(source, &io, info, size, (FILE_INFORMATION_CLASS)65);
+    if (status == (NTSTATUS)0xc0000003 || status == (NTSTATUS)0xc0000002 ||
+        status == (NTSTATUS)0xc00000bb) {
+        /* Older kernels/Wine may not implement the extended information class. */
+        memset(info, 0, sizeof(flags));
+        info->ReplaceIfExists = TRUE;
+        status = set(source, &io, info, size, (FILE_INFORMATION_CLASS)10);
+    }
     free(w);
     free(info);
     return status < 0 ? kv_win32_error(error(status)) : 0;

@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <aclapi.h>
+#include <winternl.h>
 static char *join(const char *root, const char *name)
 {
     char *result; assert(asprintf(&result, "%s/%s", root, name) >= 0); return result;
@@ -24,6 +25,12 @@ int main(void)
     HANDLE acl_handle = kv_win32_open(bundle, READ_CONTROL, FILE_SHARE_READ | FILE_SHARE_WRITE,
                                     OPEN_EXISTING, 0);
     assert(acl_handle != INVALID_HANDLE_VALUE);
+    /* Helpers inspect metadata even when the caller only requests ACL access. */
+    typedef NTSTATUS (NTAPI *QueryFn)(HANDLE, ULONG, PVOID, ULONG, PULONG);
+    struct { ULONG attributes, granted_access; ULONG rest[14]; } basic;
+    QueryFn query = (QueryFn)(void *)GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtQueryObject");
+    assert(query && query(acl_handle, 0, &basic, sizeof(basic), NULL) >= 0);
+    assert(basic.granted_access & FILE_READ_ATTRIBUTES);
     PSECURITY_DESCRIPTOR sd = NULL; PACL acl = NULL;
     assert(GetSecurityInfo(acl_handle, SE_FILE_OBJECT, DACL_SECURITY_INFORMATION,
                           NULL, NULL, &acl, NULL, &sd) == ERROR_SUCCESS);

@@ -1,3 +1,5 @@
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+
 load("//build:defs.bzl", "vm_library")
 
 package(default_visibility = ["//visibility:public"])
@@ -28,6 +30,7 @@ vm_library(
         "@platforms//os:macos": [],
         "//conditions:default": ["-lrt"],
     }) + select({
+        "//build:sdl_macos": [],
         "//build:sdl_enabled": ["-lSDL"],
         "//conditions:default": [],
     }),
@@ -40,6 +43,9 @@ vm_library(
         "//src/storage:confined",
     ] + select({
         "@platforms//os:windows": ["//src/storage:win32_files"],
+        "//conditions:default": [],
+    }) + select({
+        "//build:sdl_macos": ["@macos_sdl//:headers"],
         "//conditions:default": [],
     }),
 )

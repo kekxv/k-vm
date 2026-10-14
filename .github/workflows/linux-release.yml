@@ -78,6 +78,16 @@ jobs:
       - uses: docker/setup-qemu-action@v3
         with:
           platforms: riscv64
+      - name: Identify boot component cache
+        id: boot-cache-key
+        run: echo "key=$(python3 tools/prepare_agent_image.py --print-boot-cache-key)" >> "$GITHUB_OUTPUT"
+      - name: Cache Linux and OpenSBI binaries
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/k-vm-riscv-build/boot
+          key: k-vm-boot-${{ runner.os }}-${{ steps.boot-cache-key.outputs.key }}
+          restore-keys: |
+            k-vm-boot-${{ runner.os }}-
       - name: Test image preparation and packaging
         run: |
           python3 tools/agent_image/test_prepare.py
@@ -87,7 +97,7 @@ jobs:
         run: bazel build --config=linux-amd64-musl //:k-vm
       - name: Build base image without Node.js or Pi
         # Extract as root to preserve guest Unix ownership inside the ext4 disk.
-        run: sudo python3 tools/prepare_agent_image.py --output images/base-riscv64
+        run: sudo python3 tools/prepare_agent_image.py --output images/base-riscv64 --build-cache "$RUNNER_TEMP/k-vm-riscv-build"
       - name: Check base guest workspace and command interruption
         run: python3 tests/agent_workspace_check.py --image images/base-riscv64
       - name: Package sparse image and verify checksum

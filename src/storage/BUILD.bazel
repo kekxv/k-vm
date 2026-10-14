@@ -99,6 +99,7 @@ vm_library(
     linkopts = select({
         "@platforms//os:windows": [],
         "//build:local_only": [],
+        "@platforms//os:macos": ["-lcurl"],
         "//conditions:default": [
             "-lcurl",
             "-lcrypto",
@@ -110,6 +111,7 @@ vm_library(
     ] + select({
         "@platforms//os:windows": [],
         "//build:local_only": [":utils"],
+        "@platforms//os:macos": [":utils", "@macos_openssl//:headers"],
         "//conditions:default": [":utils"],
     }),
 )

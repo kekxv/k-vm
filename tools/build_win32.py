@@ -45,7 +45,7 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     flags = ['-std=gnu11', '-O2', '-g', '-Wall', '-Wextra', '-UNDEBUG', '-fno-strict-aliasing',
              '-D_GNU_SOURCE', '-D_FILE_OFFSET_BITS=64', '-D_LARGEFILE_SOURCE',
-             '-D_WIN32_WINNT=0x0602', '-DWIN32_LEAN_AND_MEAN', '-DNOMINMAX',
+             '-D_WIN32_WINNT=0x0a00', '-DWIN32_LEAN_AND_MEAN', '-DNOMINMAX',
              '-mno-ms-bitfields',
              '-DCONFIG_VERSION="0.1.0"', '-DCONFIG_SLIRP', '-DCONFIG_RISCV_MAX_XLEN=128']
     flags += ['-I' + str(ROOT / p) for p in ['src/include', 'src/storage', 'src/sandbox', 'src/net', 'third_party']]

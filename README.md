@@ -68,6 +68,9 @@ Pi 结束后会进入 shell。执行更新前先退出使用该镜像的沙盒�
 不等于实际占用或压缩包下载大小。`--size-gb 3` 可以减少预留空间。
 本机重新构建的完整 Pi 镜像约 **665 MiB**；初始化后的磁盘占用还会受文件系统写入影响。
 
+Linux/OpenSBI 版本与源码校验固定在 [versions.json](tools/agent_image/versions.json)。
+本地和 CI 缓存已编译的启动组件，命中后直接复用；更新版本文件、构建脚本或编译器时重新构建。
+
 准备工具默认构建基础镜像；需要预装完整 Pi 环境时添加 `--with-pi`：
 
 ```sh
@@ -104,7 +107,7 @@ GitHub Actions 在一个 Linux job 中交叉构建以下四种版本，统一上
 这些是**宿主机程序架构**，不会改变 RISC-V 客户机。静态版本仍依赖 Linux 内核接口。
 映射后端使用 `openat2`，需要 Linux 5.6+ 且该系统调用可用。
 
-安装 Bazelisk 与 Python 3，然后选择构建配置：
+安装 Bazelisk 与 Python 3；项目通过 `.bazelversion` 固定使用 Bazel **9.3.0**。然后选择构建配置：
 
 ```sh
 bazel build --config=linux-amd64-musl //:k-vm

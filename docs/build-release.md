@@ -40,7 +40,7 @@ build:linux-amd64-glibc231 --extra_toolchains=@zig_sdk//toolchain:linux_amd64_gn
 ```
 
 然后使用 `--glibc 2.31` 打包。选择更旧基线不意味着支持旧 Linux 内核：当前 Linux 文件映射需要 `openat2`（Linux 5.6+）。
-Bazel 7.4.1 固定在 `.bazelversion`；工具链模块及其校验由 `MODULE.bazel.lock` 固定。
+Bazel 9.3.0 固定在 `.bazelversion`；工具链模块及其校验由 `MODULE.bazel.lock` 固定。
 
 ## 自动化
 
@@ -48,7 +48,7 @@ Bazel 7.4.1 固定在 `.bazelversion`；工具链模块及其校验由 `MODULE.b
 
 1. main 推送、PR、手动运行：在一个 x86_64 Linux runner 上交叉构建四种产物，共用工具链缓存；核心测试与实际 RISC-V 客户机检查仅在 amd64/musl 上运行一次，每种产物分别检查 ELF ABI。ARM64 产物不在此工作流中执行原生测试。
 2. 统一上传 `k-vm-linux` 工作流产物，内含四组独立 tar.gz 与 SHA256，运行检查覆盖 Pi 初始化、自动启动和更新事务，不需要 Pi 认证或真实 npm 安装。
-3. 独立镜像 job 交叉编译内核与 OpenSBI，使用 Docker/QEMU 准备 Debian RV64 基础系统；验证客户机文件映射和命令中断后，上传 `k-vm-base-riscv64` 产物（tar.xz 和 SHA256）。不预装 Node.js/Pi，不包含宿主认证文件。
+3. 独立镜像 job 根据 `tools/agent_image/versions.json` 固定内核与 OpenSBI，使用 Actions Cache 保存和复用启动组件；未命中或校验失败时才交叉编译，再使用 Docker/QEMU 准备 Debian RV64 基础系统；验证客户机文件映射和命令中断后，上传 `k-vm-base-riscv64` 产物（tar.xz 和 SHA256）。不预装 Node.js/Pi，不包含宿主认证文件。
 4. `v*` 标签：程序打包 job 及基础镜像 job 全部成功后下载所有产物、再次检查 SHA256，创建或更新该标签的 GitHub Release。
 
 基础镜像包包含启动配置、构建来源、内核配置、内核、固件和根磁盘。打包使用 GNU sparse tar + xz，保留 4 GiB 逻辑磁盘的稀疏区域；本机压缩后约 53.2 MiB，实际大小随构建版本变化。
@@ -60,6 +60,8 @@ python3 tools/package_image.py --image images/base-riscv64
 cd dist
 sha256sum --check k-vm-base-riscv64.tar.xz.sha256
 ```
+
+启动组件缓存按 Linux/OpenSBI 各自的版本、源码 SHA256、构建脚本和编译器身份区分；修改版本清单后，旧缓存中的未变组件仍可复用。缓存只保存内核、内核配置、固件及校验清单，不上传源码树、磁盘或用户配置。GitHub 缓存可能被淘汰，此时自动重新编译。
 
 解压后使用 `--image ./k-vm-base-riscv64` 进入 shell 或初始化 Pi，参见 README。
 没有部署服务器。PR 仅有只读仓库权限；Release job 单独获得 `contents: write`。

@@ -1,3 +1,5 @@
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+
 package(default_visibility = ["//visibility:public"])
 
 config_setting(
@@ -8,6 +10,12 @@ config_setting(
 config_setting(
     name = "sdl_enabled",
     define_values = {"sdl": "true"},
+)
+
+config_setting(
+    name = "sdl_macos",
+    define_values = {"sdl": "true"},
+    constraint_values = ["@platforms//os:macos"],
 )
 
 # Macros affect shared headers and must agree in every translation unit.
@@ -22,7 +30,7 @@ cc_library(
         "CONFIG_RISCV_MAX_XLEN=128",
     ] + select({
         "@platforms//os:windows": [
-            "_WIN32_WINNT=0x0602",
+            "_WIN32_WINNT=0x0a00",
             "WIN32_LEAN_AND_MEAN",
             "NOMINMAX",
         ],

@@ -122,7 +122,30 @@ int main(void) {
                          0600, 0));
     assert(s->fs_write(s, f, 0, (const uint8_t *)"replace", 7) == 7);
     s->fs_delete(s, f);
+    char target_path[MAX_PATH];
+    snprintf(target_path, sizeof(target_path), "%s\\readonly-target", root);
+    char target_alias[MAX_PATH];
+    snprintf(target_alias, sizeof(target_alias), "%s\\readonly-target-alias", root);
+    assert(CreateHardLinkA(target_alias, target_path, NULL));
+    HANDLE old_target = kv_win32_open(target_path, FILE_READ_ATTRIBUTES,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, OPEN_EXISTING, 0);
+    assert(old_target != INVALID_HANDLE_VALUE);
+    FILE_BASIC_INFO target_info;
+    assert(GetFileInformationByHandleEx(old_target, FileBasicInfo, &target_info,
+                                       sizeof(target_info)));
+    assert(target_info.FileAttributes & FILE_ATTRIBUTE_READONLY);
+    CloseHandle(old_target);
     assert(!s->fs_renameat(s, r, "replacement-source", r, "readonly-target"));
+    old_target = kv_win32_open(target_alias, FILE_READ_ATTRIBUTES,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, OPEN_EXISTING, 0);
+    assert(old_target != INVALID_HANDLE_VALUE);
+    FILE_BASIC_INFO preserved_info;
+    assert(GetFileInformationByHandleEx(old_target, FileBasicInfo, &preserved_info,
+                                       sizeof(preserved_info)));
+    assert(preserved_info.FileAttributes == target_info.FileAttributes);
+    CloseHandle(old_target);
+    assert(SetFileAttributesA(target_alias, FILE_ATTRIBUTE_NORMAL));
+    assert(DeleteFileA(target_alias));
     char *replaced[] = {"readonly-target"};
     assert(s->fs_walk(s, &f, q, r, 1, replaced) == 1);
     assert(!s->fs_stat(s, f, &st) && st.st_size == 7 &&
