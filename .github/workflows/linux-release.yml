@@ -15,6 +15,10 @@ concurrency:
   cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 jobs:
+  host-compatibility:
+    name: Host compatibility checks
+    uses: ./.github/workflows/host-compatibility.yml
+
   build:
     name: Linux packages (amd64 + arm64)
     runs-on: ubuntu-24.04
@@ -27,6 +31,10 @@ jobs:
           repository-cache: true
       - name: Install guest fixture tools
         run: sudo apt-get update && sudo apt-get install -y e2fsprogs binutils
+      - name: Test release automation
+        run: |
+          python3 tools/ci_run.py -- python3 tests/release_version_test.py
+          python3 tools/ci_run.py -- python3 tests/publish_release_test.py
       - name: Build and test portable runtime
         run: |
           python3 tools/ci_run.py --bazel -- bazel test --config=linux-amd64-musl \
@@ -133,27 +141,63 @@ jobs:
           if-no-files-found: ignore
 
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [build, base-image]
+    if: >-
+      startsWith(github.ref, 'refs/tags/v') ||
+      (github.ref == 'refs/heads/main' && github.event_name != 'pull_request')
+    needs: [build, base-image, host-compatibility]
+    concurrency:
+      group: k-vm-release
+      cancel-in-progress: false
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+      - name: Select release tag
+        id: version
+        env:
+          RELEASE_REF: ${{ github.ref }}
+          RELEASE_REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [[ "$RELEASE_REF" == refs/tags/v* ]]; then
+            tag="$RELEASE_REF_NAME"
+            publish=true
+          else
+            tag=$(python3 tools/ci_run.py -- python3 tools/release_version.py)
+            # An authentication/network error fails the step; it is not a missing tag.
+            existing=$(python3 tools/ci_run.py -- git ls-remote --tags origin "refs/tags/$tag")
+            if [[ -n "$existing" ]]; then
+              publish=false
+              echo "### Release skipped: $tag already exists" >> "$GITHUB_STEP_SUMMARY"
+            else
+              publish=true
+            fi
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
       - uses: actions/download-artifact@v4
+        if: steps.version.outputs.publish == 'true'
         with:
           pattern: k-vm-*
           merge-multiple: true
           path: dist
       - name: Verify checksums
-        working-directory: dist
-        run: sha256sum --check *.sha256
-      - name: Publish tagged release
+        if: steps.version.outputs.publish == 'true'
+        run: |
+          cd dist
+          python3 ../tools/ci_run.py -- sha256sum --check *.sha256
+      - name: Publish version release
+        if: steps.version.outputs.publish == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ github.ref_name }}
-        run: |
-          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release create "$RELEASE_TAG" --verify-tag --generate-notes --title "k-vm $RELEASE_TAG"
-          fi
-          gh release upload "$RELEASE_TAG" dist/* --clobber
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          RELEASE_SHA: ${{ github.sha }}
+        run: python3 tools/ci_run.py -- bash tools/publish_release.sh
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-logs-release
+          path: ${{ runner.temp }}/k-vm-ci-logs/
+          if-no-files-found: ignore

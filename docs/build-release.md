@@ -49,7 +49,8 @@ Bazel 9.3.0 固定在 `.bazelversion`；工具链模块及其校验由 `MODULE.b
 1. main 推送、PR、手动运行：在一个 x86_64 Linux runner 上交叉构建四种产物，共用工具链缓存；核心测试与实际 RISC-V 客户机检查仅在 amd64/musl 上运行一次，每种产物分别检查 ELF ABI。ARM64 产物不在此工作流中执行原生测试。
 2. 统一上传 `k-vm-linux` 工作流产物，内含四组独立 tar.gz 与 SHA256，运行检查覆盖 Pi 初始化、自动启动和更新事务，不需要 Pi 认证或真实 npm 安装。
 3. 独立镜像 job 根据 `tools/agent_image/versions.json` 固定内核与 OpenSBI，使用 Actions Cache 保存和复用启动组件；未命中或校验失败时才交叉编译，再使用 Docker/QEMU 准备 Debian RV64 基础系统；验证客户机文件映射和命令中断后，上传 `k-vm-base-riscv64` 产物（tar.xz 和 SHA256）。不预装 Node.js/Pi，不包含宿主认证文件。
-4. `v*` 标签：程序打包 job 及基础镜像 job 全部成功后下载所有产物、再次检查 SHA256，创建或更新该标签的 GitHub Release。
+4. main 推送（或在 main 上手动运行）时，程序打包、基础镜像、Windows、ARM64 macOS、Linux 和 SDL 检查全部通过后，读取 `MODULE.bazel` 中 `module(version = "...")`。例如 `0.1.0` 对应 `v0.1.0`：远程已有该标签则跳过；没有则将本次提交的程序和基础镜像产物上传到草稿 Release，再公开发布并由 GitHub 创建标签。后续发布只需修改模块版本并推送 main。
+5. 仍支持手动推送 `v*` 标签：同样等待全部检查完成、验证 SHA256 后创建或更新该标签的 Release。PR 不创建标签或发布版本。发布 job 串行执行，使用 `GITHUB_TOKEN` 的 `contents: write` 权限，自动创建的标签不会再次触发重复构建。上传中断时草稿保留，标签尚未创建时可通过重新运行工作流继续发布。
 
 基础镜像包包含启动配置、构建来源、内核配置、内核、固件和根磁盘。打包使用 GNU sparse tar + xz，保留 4 GiB 逻辑磁盘的稀疏区域；本机压缩后约 53.2 MiB，实际大小随构建版本变化。
 本地准备并打包：
@@ -65,16 +66,15 @@ sha256sum --check k-vm-base-riscv64.tar.xz.sha256
 
 解压后使用 `--image ./k-vm-base-riscv64` 进入 shell 或初始化 Pi，参见 README。
 没有部署服务器。PR 仅有只读仓库权限；Release job 单独获得 `contents: write`。
-现有 `host-compatibility.yml` 继续检查系统工具链、macOS、Windows 和 SDL。Windows 使用 `bazel test --config=win32 //...`，由同一 hermetic 模块提供 Zig/Clang 与 MinGW 运行库，不再安装 MSYS2/GCC 或重复编译。Linux/macOS 可用该配置交叉编译 Windows EXE；原生 Windows runner 负责执行测试。
+`host-compatibility.yml` 作为可复用工作流由 Linux 发布工作流调用，检查系统工具链、ARM64 macOS、Windows 和 SDL。Windows 使用 `bazel test --config=win32 //...`，由同一 hermetic 模块提供 Zig/Clang 与 MinGW 运行库，不再安装 MSYS2/GCC 或重复编译。Linux/macOS 可用该配置交叉编译 Windows EXE；原生 Windows runner 负责执行测试。
 
 要启用 GitHub 工作流，需要把本地仓库推送到你创建的 GitHub 仓库：
 
 ```sh
 git remote add origin https://github.com/YOUR_ACCOUNT/k-vm.git
 git push -u origin main
-# 确认 CI 成功后发布版本
-git tag v0.1.0
-git push origin v0.1.0
+# CI 全部通过后自动发布 MODULE.bazel 中尚未打标签的版本
+# 下一版：修改 module(version = "0.1.1")，提交并推送 main
 ```
 
 本地创建仓库不会执行远程 CI。本文命令中的账号需替换为你的实际仓库地址。
