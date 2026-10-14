@@ -1,2 +1,3 @@
 exports_files(["k-vm-init.sh"])
+exports_files(["k-vm-install-pi.sh"])
 filegroup(name = "bootstrap", srcs = ["k-vm-init.sh"], visibility = ["//visibility:public"])

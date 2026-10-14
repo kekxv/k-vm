@@ -8,6 +8,7 @@ vm_library(
     hdrs = ["launch.h"],
     includes = ["."],
     deps = [
+        ":initialize",
         ":workspace",
         "//src/core:machine",
         "//src/storage:block_file",
@@ -32,7 +33,7 @@ vm_library(
         "@platforms//os:windows": ["-ladvapi32"],
         "//conditions:default": [],
     }),
-    deps = select({
+    deps = [":initialize"] + select({
         "@platforms//os:windows": ["//src/storage:win32_files"],
         "//conditions:default": ["//src/storage:host_io"],
     }),
@@ -47,9 +48,21 @@ vm_library(
     hdrs = ["update.h"],
     includes = ["."],
     deps = [
+        ":initialize",
         ":workspace",
         "//src/storage:image_update",
     ],
+)
+
+vm_library(
+    name = "initialize",
+    srcs = ["initialize.c"],
+    hdrs = ["initialize.h"],
+    includes = ["."],
+    deps = ["//src/core:machine"] + select({
+        "@platforms//os:windows": ["//src/storage:win32_files"],
+        "//conditions:default": [],
+    }),
 )
 
 vm_library(
@@ -68,5 +81,5 @@ vm_library(
         "@platforms//os:windows": ["@platforms//:incompatible"],
         "//conditions:default": [],
     }),
-    deps = ["//src/storage:host_io_portable"],
+    deps = [":initialize", "//src/storage:host_io_portable"],
 )

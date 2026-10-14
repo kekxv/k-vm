@@ -35,6 +35,7 @@ sh_binary(
     srcs = ["prepare_agent_image.py"],
     data = [
         "agent_image/Dockerfile",
+        "//guest:k-vm-install-pi.sh",
         "//guest:bootstrap",
     ],
 )

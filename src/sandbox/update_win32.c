@@ -9,7 +9,10 @@
 #include "update.h"
 #include "workspace.h"
 #include "image_update.h"
+#include "initialize.h"
 static ImageUpdate *transaction;
+static char *original_disk;
+static const char *active_operation;
 static volatile LONG interrupted;
 static BOOL cleanup_registered;
 static void rollback_at_exit(void)
@@ -30,15 +33,16 @@ static BOOL WINAPI interrupt_update(DWORD event)
        The VM installs its own handler later and requests guest shutdown there. */
     return TRUE;
 }
-int sandbox_update_run(VirtMachineParams *p)
+int sandbox_update_run(VirtMachineParams *p, const char *operation)
 {
+    active_operation = operation;
     if (transaction) {
         errno = EBUSY;
         return 1;
     }
     InterlockedExchange(&interrupted, 0);
     if (!SetConsoleCtrlHandler(interrupt_update, TRUE)) {
-        fprintf(stderr, "k-vm update: cannot install cancellation handler\n");
+        fprintf(stderr, "k-vm %s: cannot install cancellation handler\n", operation);
         return 1;
     }
     transaction = image_update_begin(p->tab_drive[0].filename);
@@ -47,7 +51,7 @@ int sandbox_update_run(VirtMachineParams *p)
             image_update_finish(transaction, FALSE);
             transaction = NULL;
         } else
-            perror("k-vm update: cannot stage disk (image may be in use)");
+            fprintf(stderr, "k-vm %s: cannot stage disk (image may be in use): %s\n", operation, strerror(errno));
         SetConsoleCtrlHandler(interrupt_update, FALSE);
         return 1;
     }
@@ -67,6 +71,14 @@ int sandbox_update_run(VirtMachineParams *p)
         SetConsoleCtrlHandler(interrupt_update, FALSE);
         return 1;
     }
+    original_disk = strdup(p->tab_drive[0].filename);
+    if (!original_disk) {
+        free(stage);
+        image_update_finish(transaction, FALSE);
+        transaction = NULL;
+        SetConsoleCtrlHandler(interrupt_update, FALSE);
+        return 1;
+    }
     free(p->tab_drive[0].filename);
     p->tab_drive[0].filename = stage;
     return -1;
@@ -80,16 +92,20 @@ int sandbox_update_complete(int vm_status)
     ImageUpdate *u = transaction;
     transaction = NULL;
     int result = image_update_finish(u, success);
+    if (!result && success && sandbox_pi_record_initialized(original_disk))
+        fprintf(stderr, "k-vm: install succeeded, but readiness hint could not be saved; next Pi launch will verify installation again\n");
+    free(original_disk); original_disk = NULL;
     SetConsoleCtrlHandler(interrupt_update, FALSE);
     if (result) {
-        perror("k-vm update: commit failed; original image preserved");
+        fprintf(stderr, "k-vm %s: commit failed; original image preserved: %s\n", active_operation, strerror(errno));
         return 1;
     }
     if (!success) {
         fprintf(stderr,
-                "k-vm update: guest update failed or interrupted; original image preserved\n");
+                "k-vm %s: guest installation failed or interrupted; original image preserved\n", active_operation);
         return 1;
     }
-    puts("k-vm update: Pi updated in the local image");
+    printf("k-vm %s: Pi %s in the local image\n", active_operation,
+           !strcmp(active_operation,"init") ? "initialized" : "updated");
     return 0;
 }

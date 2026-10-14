@@ -17,7 +17,7 @@ COMMON = [
     'src/storage/fs.c', 'src/storage/fs_confined_win32.c', 'src/storage/win32_files.c',
     'src/storage/block_file_win32.c', 'src/storage/image_update_win32.c',
     'src/net/host_network.c', 'src/sandbox/launch.c', 'src/sandbox/workspace.c',
-    'src/sandbox/workspace_host_win32.c', 'src/sandbox/update_win32.c',
+    'src/sandbox/workspace_host_win32.c', 'src/sandbox/update_win32.c', 'src/sandbox/initialize.c',
     'src/frontend/main.c', 'src/frontend/console_win32.c', 'src/frontend/win32_entry.c',
 ]
 LIBS = ['-lws2_32', '-liphlpapi', '-lshell32', '-lbcrypt', '-ladvapi32', '-lm']
@@ -73,6 +73,7 @@ def main():
     print(exe)
     if args.test:
         tests = {
+            'win32_initialize_test': ['src/sandbox/initialize.c'],
             'win32_disk_test': ['src/storage/block_file_win32.c', 'src/storage/image_update_win32.c'],
             'win32_filesystem_test': ['src/storage/fs_confined_win32.c'],
             'win32_workspace_test': ['src/sandbox/workspace_host_win32.c'],

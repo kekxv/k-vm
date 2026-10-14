@@ -12,6 +12,7 @@
 #include <sys/stat.h>
 #include "launch.h"
 #include "workspace.h"
+#include "initialize.h"
 #include "fs_utils.h"
 #ifdef _WIN32
 #include "win32_files.h"
@@ -177,7 +178,8 @@ static int check_raw_disk(const char *path)
 #endif
 }
 
-static int check_image_capabilities(const char *cfg, const char *agent)
+static int check_image_capabilities(const char *cfg, const char *agent, BOOL initialize,
+                                    const char *disk, char **node_version)
 {
     char *metadata = get_file_path(cfg, "sandbox.json");
     if (access(metadata, F_OK)) { free(metadata); return 0; }
@@ -197,9 +199,19 @@ static int check_image_capabilities(const char *cfg, const char *agent)
     }
     JSONValue kvm = json_object_get(caps, "requires_kvm");
     BOOL needs_kvm = kvm.type == JSON_BOOL && kvm.u.b;
+    JSONValue bootstrap = json_object_get(caps, "pi_bootstrap");
+    BOOL installable = bootstrap.type == JSON_INT && bootstrap.u.int32 == 1;
+    const char *install_version = json_get_str(json_object_get(caps, "node_install_version"));
+    if (initialize && installable && !needs_kvm && install_version)
+        *node_version = strdup(install_version);
     json_free(caps);
-    if (!found) return fail("selected program is not installed in this image; prepare the RISC-V Pi image or choose --agent shell");
     if (needs_kvm) return fail("KVM images are unsupported; use a RISC-V image");
+    if (!strcmp(agent, "pi") && installable) {
+        if (initialize || found || (disk && sandbox_pi_initialized(disk))) return 0;
+        return 2; /* Main initializes in an isolated subprocess, then reparses. */
+    }
+    if (initialize) return fail("k-vm init requires a base image with the Pi installer; prepare a new base image");
+    if (!found) return fail("selected program is not installed in this image; prepare the RISC-V Pi image or choose --agent shell");
     return 0;
 }
 
@@ -230,6 +242,7 @@ int sandbox_prepare(int argc, char **argv, VirtMachineParams *p,
         {"network", required_argument, NULL, 'n'}, {"disk-mode", required_argument, NULL, 'd'},
         {"memory", required_argument, NULL, 'm'}, {"append", required_argument, NULL, 'a'},
         {"version", required_argument, NULL, 'V'},
+        {"packages", required_argument, NULL, 'P'},
         {"help", no_argument, NULL, 'h'},
         {NULL, 0, NULL, 0},
     };
@@ -237,19 +250,25 @@ int sandbox_prepare(int argc, char **argv, VirtMachineParams *p,
     const char *maps[MAX_FS_DEVICE];
     int count = 0, memory = 0, opt;
     BOOL auto_workspace = TRUE;
-    BOOL update = !strcmp(argv[0], "update");
+    BOOL initialize = !strcmp(argv[0], "init");
+    BOOL update = !strcmp(argv[0], "update") || initialize;
+    const char *packages = NULL;
+    char *resolved_packages = NULL;
     const char *pi_version = "latest";
-    const char *agent = "shell", *config_dir = NULL;
+    const char *agent = initialize ? "pi" : "shell", *config_dir = NULL;
     char *default_image = NULL;
     *disk_mode = BF_MODE_SNAPSHOT;
     *allow_ctrlc = FALSE;
     optind = 1;
     while ((opt = getopt_long(argc, argv, "+", opts, NULL)) != -1) {
-        if (update && opt != 'i' && opt != 'V' && opt != 'm' && opt != 'n' && opt != 'h')
-            return fail("update accepts --image, --version, --memory and --network only");
+        if (update && opt != 'i' && opt != 'V' && opt != 'm' && opt != 'n' && opt != 'h' &&
+            !(initialize && (opt == 'g' || opt == 'P')))
+            return fail("%s accepts --image, --version, --memory and --network%s only",
+                        argv[0], initialize ? ", --agent pi and --packages" : "");
         switch (opt) {
         case 'g': agent = optarg; break;
         case 'V': pi_version = optarg; break;
+        case 'P': packages = optarg; break;
         case 'c': config_dir = optarg; break;
         case 'l': auto_workspace = FALSE; break;
         case 'i': image = optarg; break;
@@ -273,19 +292,22 @@ int sandbox_prepare(int argc, char **argv, VirtMachineParams *p,
         }
         case 'a': cmdline = optarg; break;
         case 'h':
-            if (update) puts("usage: k-vm update [--image DIR_OR_CFG] [--version latest|X.Y.Z] [--memory MB] [--network user|tap:IF]\nUpdates Pi in a cloned disk; commits on success. No project or credentials exported.");
+            if (initialize) puts("usage: k-vm init [--image DIR_OR_CFG] [--agent pi] [--version latest|X.Y.Z] [--packages DIR] [--memory MB] [--network user|none|tap:IF]\nInstalls Node.js and Pi in a cloned disk; commits on success. No project or credentials exported.\nOffline packages: Node RV64 archive, SHASUMS256.txt and populated npm-cache.");
+            else if (update) puts("usage: k-vm update [--image DIR_OR_CFG] [--version latest|X.Y.Z] [--memory MB] [--network user|tap:IF]\nUpdates Pi in a cloned disk; commits on success. No project or credentials exported.");
             else help();
             exit(0);
         default: return fail("invalid sandbox arguments; see --help");
         }
     }
     if (update) {
-        if (count || config_dir || !auto_workspace || cmdline || optind != argc || *disk_mode != BF_MODE_SNAPSHOT || !strcmp(network,"none"))
-            return fail("update accepts --image, --version, --memory and network options only");
+        if (initialize && strcmp(agent, "pi")) return fail("init supports --agent pi only");
+        if (count || config_dir || !auto_workspace || cmdline || optind != argc || *disk_mode != BF_MODE_SNAPSHOT ||
+            (!strcmp(network,"none") && !(initialize && packages)))
+            return fail("%s accepts --image, --version, --memory and network options only (offline init requires --packages)", argv[0]);
         agent = "pi";
         *allow_ctrlc = TRUE;
         *disk_mode = BF_MODE_RW;
-    } else if (strcmp(pi_version, "latest")) return fail("--version is only valid for update");
+    } else if (strcmp(pi_version, "latest") || packages) return fail("--version and --packages are only valid for update/init");
     if (!image) {
 #ifdef _WIN32
         char *environment_image = kv_win32_getenv_utf8("K_VM_IMAGE");
@@ -414,12 +436,54 @@ int sandbox_prepare(int argc, char **argv, VirtMachineParams *p,
         if (!strncmp(network, "tap:", 4)) p->tab_eth[0].ifname = strdup(network + 4);
     }
     if (auto_workspace) {
-        if (check_image_capabilities(cfg, agent)) return -1;
+        char *node_version = NULL;
+        int capability = check_image_capabilities(cfg, agent, initialize,
+                            p->drive_count == 1 ? p->tab_drive[0].filename : NULL, &node_version);
+        if (capability < 0) return -1;
         if (cmdline && (strstr(cmdline, "init=") || strstr(cmdline, "rdinit=")))
             return fail("init overrides require --no-workspace");
+        if (capability == 2 && !update) {
+            if (*disk_mode == BF_MODE_RO)
+                return fail("Pi is not initialized; read-only mode requires k-vm init --agent pi first");
+            if (!strcmp(network, "none"))
+                return fail("Pi is not initialized; run k-vm init --agent pi with network or offline --packages first");
+            if (p->drive_count != 1 || p->fs_count != count)
+                return fail("automatic init requires one root disk and no image filesystem exports");
+            /* Validate cwd, mappings and config before any persistent installation.
+               The temporary normal-launch bundle is never exposed to the installer. */
+            int original_count = p->fs_count;
+            if (workspace_prepare(p, agent, config_dir, argc - optind,
+                                  (const char *const *)(argv + optind))) return -1;
+            workspace_cleanup();
+            for (int i = original_count; i < p->fs_count; i++) {
+                free(p->tab_fs[i].tag); free(p->tab_fs[i].filename);
+                memset(&p->tab_fs[i], 0, sizeof(p->tab_fs[i]));
+            }
+            p->fs_count = original_count;
+            return 2;
+        }
         if (update) {
-            if (p->drive_count != 1 || p->fs_count) return fail("update requires one root disk and no image filesystem exports");
-            if (workspace_prepare_update(p, pi_version)) return fail("invalid update version or launch setup failure");
+            if (p->drive_count != 1 || p->fs_count) return fail("%s requires one root disk and no image filesystem exports", argv[0]);
+            if (capability == 2) return fail("Pi is not initialized; run k-vm init --agent pi first");
+            if (packages) {
+                resolved_packages = realpath(packages, NULL);
+                if (!resolved_packages) return fail("init packages: %s", strerror(errno));
+                /* add_mapping already performs native file validation; require a directory here. */
+#ifdef _WIN32
+                wchar_t *wide = kv_win32_utf16(resolved_packages);
+                DWORD attrs = wide ? GetFileAttributesW(wide) : INVALID_FILE_ATTRIBUTES;
+                free(wide);
+                BOOL directory = attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY);
+#else
+                struct stat package_stat;
+                BOOL directory = !stat(resolved_packages, &package_stat) && S_ISDIR(package_stat.st_mode);
+#endif
+                if (!directory) { free(resolved_packages); return fail("init --packages must be a directory"); }
+            }
+            int setup = initialize ? workspace_prepare_init(p, pi_version, resolved_packages, node_version) : workspace_prepare_update(p, pi_version);
+            free(node_version);
+            free(resolved_packages);
+            if (setup) return fail("invalid update/init version or launch setup failure");
         } else if (workspace_prepare(p, agent, config_dir, argc - optind, (const char *const *)(argv + optind)))
             return -1;
         vm_add_cmdline(p, "init=/sbin/k-vm-init");

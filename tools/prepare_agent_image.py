@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a Debian slim RV64 Pi image for TinyEMU (no KVM required)."""
+"""Build a Debian slim RV64 base image; optionally preinstall Node.js/Pi."""
 import argparse
 import hashlib
 import json
@@ -32,6 +32,11 @@ def vm_config():
             'bios': 'opensbi.bin', 'kernel': 'kernel.bin',
             'cmdline': 'earlycon=sbi console=hvc0 root=/dev/vda rw init=/sbin/k-vm-init',
             'drive0': {'file': 'rootfs.raw'}}
+
+
+def agent_capabilities(with_pi):
+    return {'bootstrap': 1, 'arch': 'riscv64', 'agents': ['shell', 'pi'] if with_pi else ['shell'],
+            'pi_bootstrap': 1, 'requires_kvm': False}
 
 
 def fetch(url):
@@ -104,7 +109,7 @@ def build_boot(cache, kernel_version):
     return kernel / 'arch/riscv/boot/Image', firmware / 'build/platform/generic/firmware/fw_jump.bin', kernel_sha
 
 
-def prepare(output, size_gb=4, cache=None, kernel_version=None):
+def prepare(output, size_gb=4, cache=None, kernel_version=None, with_pi=False):
     output = output.absolute()
     if output.exists():
         raise ValueError(f'output already exists: {output}')
@@ -120,8 +125,10 @@ def prepare(output, size_gb=4, cache=None, kernel_version=None):
     kernel, firmware, kernel_sha = build_boot(cache, kernel_version)
     node_name = f'node-v{NODE_VERSION}-linux-riscv64.tar.xz'
     node_base = f'https://unofficial-builds.nodejs.org/download/release/v{NODE_VERSION}/'
-    node_sha = published_checksum(node_base + 'SHASUMS256.txt', node_name)
-    checked_download(node_base + node_name, cache / node_name, node_sha)
+    node_sha = None
+    if with_pi:
+        node_sha = published_checksum(node_base + 'SHASUMS256.txt', node_name)
+        checked_download(node_base + node_name, cache / node_name, node_sha)
     output.parent.mkdir(parents=True, exist_ok=True)
     tag = 'k-vm-pi-build:' + uuid.uuid4().hex
     container = None
@@ -131,14 +138,18 @@ def prepare(output, size_gb=4, cache=None, kernel_version=None):
         context.mkdir()
         shutil.copyfile(ROOT / 'tools/agent_image/Dockerfile', context / 'Dockerfile')
         shutil.copyfile(ROOT / 'guest/k-vm-init.sh', context / 'k-vm-init.sh')
-        shutil.copyfile(cache / node_name, context / 'node-riscv64.tar.xz')
+        shutil.copyfile(ROOT / 'guest/k-vm-install-pi.sh', context / 'k-vm-install-pi.sh')
+        if with_pi:
+            shutil.copyfile(cache / node_name, context / 'node-riscv64.tar.xz')
         bundle = temp / 'bundle'
         bundle.mkdir()
         rootfs = temp / 'rootfs'
         rootfs.mkdir()
         try:
-            # Only these three public build inputs enter Docker; no project or credentials.
+            # Only public build inputs enter Docker; no project or credentials.
             run('docker', 'build', '--platform', 'linux/riscv64',
+                '--target', 'pi' if with_pi else 'base',
+                '--build-arg', f'PI_VERSION={PI_VERSION}',
                 '--build-arg', 'HTTP_PROXY', '--build-arg', 'HTTPS_PROXY',
                 '--build-arg', 'NO_PROXY', '-t', tag, str(context))
             container = run('docker', 'create', '--platform', 'linux/riscv64', tag, text=True, capture_output=True).stdout.strip()
@@ -154,15 +165,18 @@ def prepare(output, size_gb=4, cache=None, kernel_version=None):
             run('mke2fs', '-q', '-t', 'ext4', '-F', '-d', str(rootfs), str(disk))
             (bundle / 'vm.cfg').write_text(json.dumps(vm_config(), indent=2) + '\n')
             (bundle / 'sandbox.json').write_text(json.dumps({
-                'bootstrap': 1, 'arch': 'riscv64', 'agents': ['shell', 'pi'], 'requires_kvm': False,
+                **agent_capabilities(with_pi),
                 'kernel': kernel_version, 'kernel_sha256': kernel_sha, 'opensbi': OPENSBI_VERSION,
-                'opensbi_sha256': OPENSBI_SHA256, 'node': NODE_VERSION, 'node_sha256': node_sha,
+                'opensbi_sha256': OPENSBI_SHA256,
+                **({'node': NODE_VERSION, 'node_sha256': node_sha, 'pi_build_version': PI_VERSION} if with_pi else {}),
+                'node_install_version': NODE_VERSION,
                 'opensbi_patches': ['htif-volatile-mmio'],
-                'pi_build_version': PI_VERSION, 'distribution': 'Debian trixie-slim',
+                'distribution': 'Debian trixie-slim',
             }, indent=2) + '\n')
             (bundle / 'SOURCE.txt').write_text(
                 f'Linux {kernel_version}: {kernel_sha}\nOpenSBI {OPENSBI_VERSION}: {OPENSBI_SHA256}\n'
-                f'Debian trixie-slim RV64; community Node {NODE_VERSION}: {node_sha}; Pi {PI_VERSION}.\n'
+                'Debian trixie-slim RV64 with on-demand Node/Pi installer.\n'
+                + (f'Community Node {NODE_VERSION}: {node_sha}; Pi {PI_VERSION}.\n' if with_pi else 'Node.js and Pi are not preinstalled.\n') +
                 'OpenSBI custom HTIF MMIO pointers patched volatile for reliable shutdown.\n'
                 'Built from tools/agent_image/Dockerfile. Third-party components retain their licenses.\n')
             bundle.rename(output)
@@ -170,7 +184,9 @@ def prepare(output, size_gb=4, cache=None, kernel_version=None):
             if container:
                 subprocess.run(['docker', 'rm', container], check=False, stdout=subprocess.DEVNULL)
             subprocess.run(['docker', 'image', 'rm', tag], check=False, stdout=subprocess.DEVNULL)
-    print(f'Pi RV64 image ready: {output}')
+    print(f'{"Pi" if with_pi else "Base"} RV64 image ready: {output}')
+    if not with_pi:
+        print(f'k-vm init --image {output} --agent pi  # optional: install ahead of first use')
     print(f'K_VM_IMAGE={output} k-vm sandbox --agent pi')
 
 
@@ -180,5 +196,6 @@ if __name__ == '__main__':
     parser.add_argument('--size-gb', type=int, choices=range(3, 17), default=4)
     parser.add_argument('--build-cache', type=Path)
     parser.add_argument('--kernel-version', help='pin x.y.z; default: current stable from kernel.org')
+    parser.add_argument('--with-pi', action='store_true', help='preinstall Node.js and Pi (default: base shell image)')
     args = parser.parse_args()
-    prepare(args.output, args.size_gb, args.build_cache, args.kernel_version)
+    prepare(args.output, args.size_gb, args.build_cache, args.kernel_version, args.with_pi)

@@ -6,6 +6,14 @@ prepare = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(prepare)
 
 class ReleaseTests(unittest.TestCase):
+    def test_base_image_supports_initialization_without_preinstalled_pi(self):
+        caps = prepare.agent_capabilities(False)
+        self.assertEqual(caps['agents'], ['shell'])
+        self.assertEqual(caps['pi_bootstrap'], 1)
+
+    def test_full_image_advertises_installed_pi(self):
+        self.assertEqual(prepare.agent_capabilities(True)['agents'], ['shell', 'pi'])
+
     def test_selects_stable_instead_of_rc_or_longterm(self):
         releases = {'releases': [{'moniker':'mainline','version':'7.3-rc7'}, {'moniker':'stable','version':'7.2.10'}, {'moniker':'longterm','version':'6.18.52'}]}
         self.assertEqual(prepare.stable_kernel(releases), '7.2.10')

@@ -47,6 +47,7 @@
 #include "iomem.h"
 #include "virtio.h"
 #include "launch.h"
+#include "initialize.h"
 #include "update.h"
 #ifdef CONFIG_FS_NET
 #include "fs_utils.h"
@@ -315,6 +316,7 @@ void help(void)
            "       k-vm sandbox --image DIR_OR_CFG [--map TAG=HOST[:ro|rw]]\n"
            "       k-vm sandbox --help\n"
            "       k-vm update [--image DIR_OR_CFG] [--version VERSION]\n"
+           "       k-vm init [--image DIR_OR_CFG] [--agent pi] [--version VERSION] [--packages DIR]\n"
            "options are:\n"
            "-m ram_size       set the RAM size in MB\n"
            "-rw               allow write access to the disk image (default=snapshot)\n"
@@ -365,12 +367,22 @@ int main(int argc, char **argv)
     drive_mode = BF_MODE_SNAPSHOT;
     cmdline = NULL;
     build_preload_file = NULL;
-    BOOL update = argc > 1 && !strcmp(argv[1], "update");
+    BOOL update = argc > 1 && (!strcmp(argv[1], "update") || !strcmp(argv[1], "init"));
     if (argc > 1 && (!strcmp(argv[1], "sandbox") || update)) {
-        if (sandbox_prepare(argc - 1, argv + 1, p, &drive_mode, &allow_ctrlc))
-            return 1;
+        int prepared = sandbox_prepare(argc - 1, argv + 1, p, &drive_mode, &allow_ctrlc);
+        if (prepared == 2) {
+            int installed = sandbox_initialize_image(argv[0], p);
+            virt_machine_free_config(p);
+            if (installed) return 1;
+            prepared = sandbox_prepare(argc - 1, argv + 1, p, &drive_mode, &allow_ctrlc);
+            if (prepared == 2) {
+                fprintf(stderr, "k-vm: initialization succeeded but readiness hint is unavailable; run init manually and check image directory permissions\n");
+                return 1;
+            }
+        }
+        if (prepared) return 1;
         if (update) {
-            int status = sandbox_update_run(p);
+            int status = sandbox_update_run(p, argv[1]);
             if (status >= 0) return status;
         }
     } else {

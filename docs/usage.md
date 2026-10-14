@@ -5,6 +5,11 @@
 默认启用 SLIRP 用户态网络；Linux 另提供可选 TAP。支持 HTTP/HTTPS 配置加载、远程磁盘和远程文件系统。
 自动启动会同步宿主机时间，确保客户机 HTTPS 证书验证和 npm 更新可用。
 
+**沙盒内部支持 HTTPS**：Pi 模型 API、npm 下载及更新均可通过 SLIRP 联网。
+Linux glibc、musl 静态发布版本及原生 Win32 版本均支持，TLS 由客户机内的客户端处理。
+现代 Pi 镜像包含 CA 证书；自定义镜像需自行准备 HTTPS 客户端和 CA 证书。
+Linux 发布配置和 Win32 关闭旧版宿主 HTTP 资源加载，不影响这些内部 HTTPS 请求。
+
 ## 沙盒模式
 
 沙盒模式自动将**执行时的当前目录**可写映射到客户机 `/work`，并在该目录启动 shell 或 Pi。
@@ -27,11 +32,21 @@ k-vm sandbox --agent pi -- --model MODEL
 bazel run //tools:prepare_linux_image
 ```
 
-Pi 使用现代 Debian 13（trixie-slim）RISC-V 镜像；BusyBox 提供引导和救援工具。
+默认使用现代 Debian 13（trixie-slim）RISC-V 基础镜像，未预装 Node.js/Pi；BusyBox 提供引导和救援工具。
+可从 GitHub Actions 的 `k-vm-base-riscv64` 产物或版本 Release 下载基础镜像及校验文件，无需本地构建：
+
+```sh
+sha256sum --check k-vm-base-riscv64.tar.xz.sha256
+tar -xJf k-vm-base-riscv64.tar.xz
+k-vm sandbox --image ./k-vm-base-riscv64 --agent shell
+k-vm init --image ./k-vm-base-riscv64 --agent pi
+```
+
 镜像准备时自动选择 kernel.org 的最新稳定内核（排除 RC），可以用 `--kernel-version X.Y.Z` 固定版本。
 本次验证镜像为 Linux 7.2.10、OpenSBI 1.9、Debian 13、Node.js 24.21.0、Pi 1.2.0。
 OpenSBI 1.9 包含本地 HTIF MMIO `volatile` 修补，避免关机写入被编译器优化掉。
-准备工具交叉编译 Linux 和 OpenSBI，安装 Node.js RV64 社区构建与 Pi；下载文件检查发布者 SHA256。
+准备工具交叉编译 Linux 和 OpenSBI，提供 Pi 初始化脚本；`--with-pi` 才会预装 Node.js RV64 社区构建与 Pi。
+Node.js 下载在构建或初始化时检查发布者 SHA256。
 构建时需要 Docker、RV64 binfmt/QEMU user、交叉编译器、`mke2fs` 和网络：
 
 ```sh
@@ -39,12 +54,71 @@ sudo apt-get install gcc-riscv64-linux-gnu g++-riscv64-linux-gnu qemu-user-stati
   binfmt-support device-tree-compiler e2fsprogs make bc bison flex libssl-dev libelf-dev
 # Docker 必须能运行 linux/riscv64 容器；在原生 RV64 主机上无需 QEMU user。
 bazel run //tools:prepare_agent_image
+# 可选：为离线或即用场景预装完整环境，输出到另一个目录
+bazel run //tools:prepare_agent_image -- --with-pi --output images/pi-full-riscv64
 ```
 
-Docker 上下文只包含 Dockerfile、客户机引导脚本和公开的 Node.js 归档，不包含项目或认证文件。
+Docker 上下文只包含 Dockerfile、客户机引导与安装脚本，以及完整镜像所需的公开 Node.js 归档，不包含项目或认证文件。
 Docker 仅用于准备镜像，沙盒运行通过 TinyEMU 软件解释器完成，不要求 Docker 或硬件虚拟化。
 shell 与 Pi 默认均查找 `~/.local/share/k-vm/images/pi-riscv64`；设置 `XDG_DATA_HOME` 时使用对应目录。
 `K_VM_IMAGE` 或 `--image` 可以覆盖路径。RV32/RV128 支持保留给旧镜像，现代 Pi 镜像仅使用 RV64。
+
+新构建基础镜像 `images/base-riscv64` 的整个目录实际占用约 304 MiB（含内核和固件），
+根磁盘逻辑容量默认 4 GiB。安装 Node.js/Pi 后占用会增加。逻辑容量、宿主文件实际占用和
+压缩包下载大小是不同的指标；`--size-gb 3` 只改变预留容量。初始化/更新的下载文件和 npm
+缓存放在客户机 `/tmp` 的 tmpfs 中，并在结束时清理，避免临时下载使稀疏根磁盘膨胀。
+本机重新构建的完整 Pi 镜像约 665 MiB；初始化后的镜像实际占用还取决于客户机文件系统的写入。
+
+Pi 运行时固定使用 Node.js 22.19+（当前验证版本为 Node.js 24.21.0）。Deno 的 Node/npm
+兼容层和 Pi 的依赖链尚未完成 RISC-V 回归验证；Bun 目前没有可靠的官方 Linux RISC-V
+运行时发行包，所以两者都不能直接替换正式镜像中的 Node.js。
+
+### 初始化 Node.js 和 Pi
+
+```sh
+# 首次 Pi 启动会自动初始化，然后再映射当前目录和配置
+k-vm sandbox --image /path/to/base-riscv64 --agent pi
+# 也可以提前安装；默认安装 npm latest
+k-vm init --image /path/to/base-riscv64 --agent pi
+k-vm init --image /path/to/base-riscv64 --agent pi --version 1.2.0
+```
+
+`init` 在克隆磁盘中安装 Node.js 和 Pi，验证 Pi 并成功关机后才提交到本地镜像。
+失败、安装中断或镜像被其他进程占用时保留原盘；不导出项目、HOME 或认证配置。
+已经安装的 Pi 默认会先验证并跳过安装；指定不同版本会安装该版本。后续升级使用 `update`。
+初始化需要网络和足够的客户机内存，建议保留默认 1024 MiB；首次安装在软件模拟器中较慢。
+基础镜像声明的 Node.js 版本会优先通过宿主 curl 下载到私有临时目录，再只读映射给客户机
+进行 SHA256 校验和安装；Windows 使用系统自带的 `curl.exe`。宿主没有 curl 时回退到客户机
+HTTPS 下载，不增加程序的动态库依赖。宿主下载失败会停止初始化，保留原盘。
+shell 无需初始化。`--disk-mode ro` 和 `--network none` 不会触发未初始化 Pi 的自动安装。
+
+成功后根磁盘旁生成 `rootfs.raw.pi-ready`，用于避免重复初始化。提示绑定磁盘文件的身份和
+修改时间；磁盘被替换、修改或跨平台复制后会重新检查安装。缺少该文件时重跑 `init` 即可，
+已安装的 Pi 不会因默认 `init` 而升级。复制镜像时建议复制整个目录。
+
+离线初始化：准备一个专用目录，包含下列文件（Node 版本与镜像安装脚本一致）：
+
+```text
+packages/
+  node-v24.21.0-linux-riscv64.tar.xz
+  SHASUMS256.txt
+  npm-cache/                        # 预先缓存指定 Pi 版本及全部 RV64 依赖
+```
+
+Node 归档和校验文件来自 `https://unofficial-builds.nodejs.org/download/release/v24.21.0/`。
+`npm-cache` 需在兼容的 Linux RV64 npm 环境中完成一次相同版本安装来填充；只有 Pi 的 tgz
+不足以离线安装，因为它还依赖其他 npm 包。应指定缓存中已有的准确版本，避免查询 latest。
+
+```sh
+k-vm init --image /path/to/base-riscv64 --agent pi --version 1.2.0 \
+  --packages /path/to/packages --network none
+```
+
+离线包目录只读映射；安装时复制所需缓存到客户机内存。校验失败或缓存缺失会导致安装失败，
+原镜像仍保留。安装脚本位于客户机 `/usr/local/sbin/k-vm-install-pi`；在普通临时沙盒中直接
+调用脚本的改动会在退出后丢失，需要持久保存时使用宿主 `k-vm init`。
+使用默认联网模式时，`--packages DIR` 也可以只提供 Node 归档和校验文件，Pi 依赖继续通过
+客户机 npm 下载；如目录包含 npm-cache，则同时导入该缓存。
 
 ### 更新客户机内的 Pi
 
@@ -60,6 +134,7 @@ k-vm update --version 1.2.0              # 指定版本
 请退出沙盒后再更新。需有克隆磁盘的临时空间；支持 reflink 时不需要完整复制；其他文件系统按稀疏块复制。
 本次真实 Pi 更新安装约 5 分钟（软件解释器）；已验证更新后重新启动、Pi CLI、HTTPS 和正常关机。
 `update` 仅更新 Pi 及其 npm 依赖；内核、Node.js 和系统包需要重新准备镜像。
+新的基础镜像必须先完成 `init`；既有完整 Pi 镜像仍可直接更新。
 不要在默认临时磁盘模式中使用 `npm install` 来保存更新，退出沙盒后这种修改会丢弃。
 
 仅将所选 agent 的必要配置复制到私有只读启动映射，再导入客户机临时 HOME：

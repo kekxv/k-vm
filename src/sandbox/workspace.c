@@ -10,6 +10,7 @@
 #include <time.h>
 #include "workspace.h"
 #include "workspace_host.h"
+#include "initialize.h"
 #ifdef _WIN32
 #include "win32_files.h"
 #endif
@@ -128,7 +129,8 @@ int workspace_prepare(VirtMachineParams *p, const char *agent, const char *confi
 }
 
 
-int workspace_prepare_update(VirtMachineParams *p, const char *version)
+static int prepare_maintenance(VirtMachineParams *p, const char *version,
+                               BOOL initialize, const char *packages, const char *node_version)
 {
     if (active_bundle || p->fs_count || !version || !*version) return -1;
     for (const char *v = version; *v; v++)
@@ -139,10 +141,28 @@ int workspace_prepare_update(VirtMachineParams *p, const char *version)
     bundle_owner = workspace_host_pid();
     atexit(workspace_cleanup);
     char *path;
+    char *downloaded = NULL;
+    if (initialize && node_version && !packages && p->eth_count &&
+        p->drive_count == 1 && !sandbox_pi_initialized(p->tab_drive[0].filename)) {
+        if (asprintf(&downloaded, "%s/node-packages", active_bundle) < 0) abort();
+        if (workspace_host_mkdir(downloaded)) { free(downloaded); workspace_cleanup(); return -1; }
+        fprintf(stderr, "k-vm init: fetching public Node.js archive on the host...\n");
+        int fetched = sandbox_prefetch_node(node_version, downloaded);
+        if (!fetched) packages = downloaded;
+        else if (fetched == 127) {
+            fputs("k-vm init: host curl unavailable; using guest HTTPS download\n", stderr);
+        } else {
+            fputs("k-vm init: host Node.js download failed; original image preserved\n", stderr);
+            free(downloaded); workspace_cleanup(); return -1;
+        }
+    }
     if (asprintf(&path, "%s/result", active_bundle) < 0) abort();
     if (workspace_host_mkdir(path)) { free(path); workspace_cleanup(); return -1; }
     export_path(p, "kv_result", path, FALSE);
     free(path);
+    if (packages) export_path(p, "kv_packages", packages, TRUE);
+    BOOL have_packages = packages != NULL;
+    free(downloaded);
     if (asprintf(&path, "%s/entry.sh", active_bundle) < 0) abort();
     FILE *entry = workspace_host_script(path);
     free(path);
@@ -154,18 +174,44 @@ int workspace_prepare_update(VirtMachineParams *p, const char *version)
     if (p->eth_count && !strcmp(p->tab_eth[0].driver, "user"))
         fputs("ifconfig eth0 10.0.2.15 netmask 255.255.255.0 up\n"
               "route add default gw 10.0.2.2\nprintf 'nameserver 10.0.2.3\\n' > /etc/resolv.conf\n", entry);
-    fputs("set +e\nnpm install -g ", entry);
-    char *package;
-    if (asprintf(&package, "@earendil-works/pi-coding-agent@%s", version) < 0) abort();
-    quote(entry, package);
-    free(package);
-    fputs(" --no-progress --no-audit --no-fund\nstatus=$?\nif [ $status -eq 0 ]; then pi --version; status=$?; fi\n"
+    if (have_packages)
+        fputs("mkdir -p /run/k-vm-packages\nmount -t 9p -o trans=virtio,version=9p2000.L,msize=8192,ro kv_packages /run/k-vm-packages\n", entry);
+    /* Download/cache writes must not inflate the sparse persistent root disk. */
+    fputs("mount -t tmpfs -o mode=1777,size=50% tmpfs /tmp\n", entry);
+    fputs("set +e\n", entry);
+    if (initialize) {
+        fputs("/usr/local/sbin/k-vm-install-pi --version ", entry);
+        quote(entry, version);
+        if (have_packages) fputs(" --packages /run/k-vm-packages", entry);
+        if (!p->eth_count) fputs(" --offline", entry);
+        fputc('\n', entry);
+    } else {
+        /* Keep updates compatible with full images built before the installer existed. */
+        fputs("export npm_config_cache=/tmp/k-vm-npm-cache\nnpm install -g ", entry);
+        char *package;
+        if (asprintf(&package, "@earendil-works/pi-coding-agent@%s", version) < 0) abort();
+        quote(entry, package);
+        free(package);
+        fputs(" --no-progress --no-audit --no-fund\n", entry);
+    }
+    fputs("status=$?\nrm -rf /tmp/k-vm-npm-cache /root/.npm\nif [ $status -eq 0 ]; then pi --version; status=$?; fi\n"
           "sync\nprintf '%s\\n' \"$status\" > /run/k-vm-result/status\nsync\n/bin/busybox poweroff -f\n", entry);
     int failed = ferror(entry);
     if (fclose(entry)) failed = 1;
     if (failed) {workspace_cleanup(); return -1;}
     export_path(p, "kv_launch", active_bundle, TRUE);
     return 0;
+}
+
+int workspace_prepare_update(VirtMachineParams *p, const char *version)
+{
+    return prepare_maintenance(p, version, FALSE, NULL, NULL);
+}
+
+int workspace_prepare_init(VirtMachineParams *p, const char *version, const char *packages,
+                           const char *node_version)
+{
+    return prepare_maintenance(p, version, TRUE, packages, node_version);
 }
 
 BOOL workspace_update_succeeded(void)

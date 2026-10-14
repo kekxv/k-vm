@@ -35,6 +35,7 @@ vm_library(
         "//src/core:machine",
         "//src/net:network",
         "//src/sandbox:launch",
+        "//src/sandbox:initialize",
         "//src/sandbox:update",
         "//src/storage:confined",
     ] + select({

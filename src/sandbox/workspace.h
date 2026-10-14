@@ -9,5 +9,7 @@ int workspace_prepare(VirtMachineParams *p, const char *agent, const char *confi
                       int argc, const char *const *argv);
 void workspace_cleanup(void);
 int workspace_prepare_update(VirtMachineParams *p, const char *version);
+int workspace_prepare_init(VirtMachineParams *p, const char *version, const char *packages,
+                           const char *node_version);
 BOOL workspace_update_succeeded(void);
 #endif

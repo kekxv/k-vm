@@ -41,7 +41,7 @@ jobs:
             //:k-vm //tests:network_test //tests:confined_fs_test \
             //tests:block_file_test //tests:image_update_test //tests:workspace_test \
             //tests:portable_confined_fs_test //tests:portable_image_update_test \
-            //tests:portable_workspace_test //tests:sandbox_test
+            //tests:portable_workspace_test //tests:sandbox_test //tests:pi_install_test //tests:initialize_test
       - name: Validate ELF ABI and package
         run: python3 tools/package_linux.py --arch '${{ matrix.arch }}' --libc '${{ matrix.libc }}' --glibc 2.28
       - name: Prepare reference guest
@@ -51,6 +51,7 @@ jobs:
           python3 tests/agent_workspace_check.py --image images/ci-riscv64
           python3 tests/linux_sandbox_check.py --image images/ci-riscv64
           python3 tests/pi_update_check.py --image images/ci-riscv64
+          python3 tests/pi_init_check.py --image images/ci-riscv64
           python3 tests/agent_dispatch_check.py --image images/ci-riscv64
       - uses: actions/upload-artifact@v4
         with:
@@ -58,16 +59,61 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
+  base-image:
+    name: RISC-V base image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: bazel-contrib/setup-bazel@0.14.0
+        with:
+          bazelisk-cache: true
+          disk-cache: ${{ github.workflow }}-base-image
+          repository-cache: true
+      - name: Install image build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-riscv64-linux-gnu g++-riscv64-linux-gnu \
+            device-tree-compiler e2fsprogs make bc bison flex libssl-dev libelf-dev xz-utils
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: riscv64
+      - name: Test image preparation and packaging
+        run: |
+          python3 tools/agent_image/test_prepare.py
+          python3 tests/pi_install_test.py
+          python3 tests/package_image_test.py
+      - name: Build portable emulator
+        run: bazel build --config=linux-amd64-musl //:k-vm
+      - name: Build base image without Node.js or Pi
+        # Extract as root to preserve guest Unix ownership inside the ext4 disk.
+        run: sudo python3 tools/prepare_agent_image.py --output images/base-riscv64
+      - name: Check base guest workspace and command interruption
+        run: python3 tests/agent_workspace_check.py --image images/base-riscv64
+      - name: Package sparse image and verify checksum
+        run: |
+          python3 tools/package_image.py --image images/base-riscv64
+          cd dist
+          sha256sum --check k-vm-base-riscv64.tar.xz.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: k-vm-base-riscv64
+          path: |
+            dist/k-vm-base-riscv64.tar.xz
+            dist/k-vm-base-riscv64.tar.xz.sha256
+          compression-level: 0
+          if-no-files-found: error
+
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    needs: [build, base-image]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: k-vm-linux-*
+          pattern: k-vm-*
           merge-multiple: true
           path: dist
       - name: Verify checksums

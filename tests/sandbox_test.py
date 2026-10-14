@@ -152,6 +152,49 @@ class SandboxTest(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("update accepts", result.stderr)
 
+    def test_init_is_transactional_and_requires_guest_success(self):
+        (self.image / "sandbox.json").write_text(json.dumps({
+            "agents": ["shell"], "pi_bootstrap": 1,
+        }))
+        before = (self.image / "rootfs.raw").read_bytes()
+        result = subprocess.run([BINARY, "init", "--image", self.image, "--agent", "pi"],
+                                capture_output=True, text=True, timeout=10)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("original image preserved", result.stderr)
+        self.assertEqual((self.image / "rootfs.raw").read_bytes(), before)
+        self.assertFalse(list(self.image.glob("*.update-*")))
+
+    def test_init_rejects_project_and_credentials(self):
+        for options in (("--map", "extra="+str(self.root)), ("--config-dir", str(self.root)),
+                        ("--agent", "shell"), ("--disk-mode", "rw")):
+            result = subprocess.run([BINARY, "init", "--image", self.image, *options],
+                                    capture_output=True, text=True, timeout=10)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("init", result.stderr)
+
+    def test_uninitialized_pi_without_network_fails_before_boot(self):
+        (self.image / "sandbox.json").write_text(json.dumps({
+            "agents": ["shell"], "pi_bootstrap": 1,
+        }))
+        result = self.run_vm("--agent", "pi", "--network", "none")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("k-vm init", result.stderr)
+        self.assertNotIn("Power off.", result.stdout)
+
+    def test_auto_init_validates_launch_before_installing(self):
+        (self.image / "sandbox.json").write_text(json.dumps({
+            "agents": ["shell"], "pi_bootstrap": 1,
+        }))
+        for options, message in (
+            (("--append", "init=/bin/sh"), "init overrides"),
+            (("--map", "work=" + str(self.root)), "reserved mapping"),
+            (("--config-dir", "/nonexistent/k-vm-config"), "cannot read agent config"),
+        ):
+            result = self.run_vm("--agent", "pi", *options)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(message, result.stderr)
+            self.assertNotIn("initializing Node.js", result.stderr)
+
     def test_invalid_launch_options_rejected(self):
         cases = [
             ("--network", "invalid"), ("--memory", "-1"),
